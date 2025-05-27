@@ -1,8 +1,8 @@
 // src/pages/dashboard/NewPickupRequest.tsx
 // New Pickup Request Page - Multi-step form for creating new e-waste pickup requests
-// Features: item selection, condition assessment, address confirmation, scheduling
+// Features: real-time item selection, condition assessment, address confirmation, scheduling
 
-import React, { useState, useContext } from 'react';
+import React, { useState, useContext, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useForm, useFieldArray } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
@@ -22,49 +22,21 @@ import {
   Printer,
   Battery,
   Keyboard,
-  Home
+  Home,
+  Trash2
 } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
 import TextArea from '../../components/ui/TextArea';
+import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import AuthContext from '../../context/AuthContext';
 import { DEVICE_CONDITIONS, TIME_SLOTS } from '../../config';
-
-// Mock categories data
-const categories = [
-  { _id: '1', name: 'Mobile Phones', icon: 'smartphone', basePrice: 500, unit: 'piece', subcategories: [
-    { name: 'Smartphones', priceModifier: 1.2 },
-    { name: 'Feature Phones', priceModifier: 0.8 },
-    { name: 'Tablets', priceModifier: 1.5 }
-  ]},
-  { _id: '2', name: 'Laptops', icon: 'laptop', basePrice: 1500, unit: 'piece', subcategories: [
-    { name: 'Gaming Laptops', priceModifier: 1.4 },
-    { name: 'Business Laptops', priceModifier: 1.2 },
-    { name: 'Budget Laptops', priceModifier: 0.9 }
-  ]},
-  { _id: '3', name: 'Desktop Computers', icon: 'monitor', basePrice: 1200, unit: 'piece', subcategories: [
-    { name: 'All-in-One PCs', priceModifier: 1.3 },
-    { name: 'Tower PCs', priceModifier: 1.0 },
-    { name: 'Mini PCs', priceModifier: 0.8 }
-  ]},
-  { _id: '4', name: 'Printers & Scanners', icon: 'printer', basePrice: 800, unit: 'piece', subcategories: [
-    { name: 'Laser Printers', priceModifier: 1.2 },
-    { name: 'Inkjet Printers', priceModifier: 1.0 },
-    { name: 'Scanners', priceModifier: 0.8 }
-  ]},
-  { _id: '5', name: 'Batteries', icon: 'battery', basePrice: 100, unit: 'piece', subcategories: [
-    { name: 'Laptop Batteries', priceModifier: 1.2 },
-    { name: 'Mobile Batteries', priceModifier: 0.8 },
-    { name: 'Power Banks', priceModifier: 1.5 }
-  ]},
-  { _id: '6', name: 'Computer Accessories', icon: 'keyboard', basePrice: 200, unit: 'piece', subcategories: [
-    { name: 'Keyboards', priceModifier: 1.0 },
-    { name: 'Mice', priceModifier: 0.8 },
-    { name: 'Webcams', priceModifier: 1.2 }
-  ]}
-];
+import { useCategories } from '../../hooks/useCategories';
+import { useCreateOrder } from '../../hooks/useOrders';
+import { useCheckPincode } from '../../hooks/usePincodes';
+import { useToast } from '../../hooks/useToast';
 
 const getIconComponent = (iconName: string) => {
   const iconMap: { [key: string]: React.ReactNode } = {
@@ -133,8 +105,19 @@ type FormData = {
 const NewPickupRequest: React.FC = () => {
   const [currentStep, setCurrentStep] = useState(1);
   const [estimatedTotal, setEstimatedTotal] = useState(0);
+  const [itemEstimates, setItemEstimates] = useState<{ [key: number]: number }>({});
+  const [pincodeStatus, setPincodeStatus] = useState<{ serviceable: boolean; message: string } | null>(null);
+  const [isSubmitting, setIsSubmitting] = useState(false);
+  
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
+  const { showSuccess, showError } = useToast();
+
+  // API Hooks
+  const { data: categoriesData, isLoading: categoriesLoading } = useCategories();
+  const createOrderMutation = useCreateOrder();
+
+  const categories = categoriesData?.data || [];
 
   const { register, handleSubmit, control, watch, setValue, formState: { errors } } = useForm<FormData>({
     resolver: yupResolver(
@@ -159,16 +142,36 @@ const NewPickupRequest: React.FC = () => {
   });
 
   const watchedItems = watch("items");
+  const watchedPincode = watch("pincode");
 
-  // Calculate estimated total
-  React.useEffect(() => {
+  // Check pincode serviceability
+  const { data: pincodeData } = useCheckPincode(watchedPincode);
+
+  useEffect(() => {
+    if (pincodeData && watchedPincode?.length === 6) {
+      setPincodeStatus({
+        serviceable: pincodeData.serviceable,
+        message: pincodeData.serviceable ? 
+          `Service available in ${pincodeData.data?.area}, ${pincodeData.data?.city}` :
+          pincodeData.message || 'Service not available in this area'
+      });
+    } else {
+      setPincodeStatus(null);
+    }
+  }, [pincodeData, watchedPincode]);
+
+  // Calculate item estimates and total
+  useEffect(() => {
     let total = 0;
+    const newItemEstimates: { [key: number]: number } = {};
+
     watchedItems.forEach((item, index) => {
       if (item.categoryId && item.condition && item.quantity) {
         const category = categories.find(c => c._id === item.categoryId);
         if (category) {
           let basePrice = category.basePrice;
           
+          // Apply subcategory modifier
           if (item.subcategory) {
             const subcategory = category.subcategories.find(sub => sub.name === item.subcategory);
             if (subcategory) {
@@ -176,13 +179,19 @@ const NewPickupRequest: React.FC = () => {
             }
           }
           
-          const conditionMultiplier = DEVICE_CONDITIONS.find(c => c.value === item.condition)?.multiplier || 0.5;
-          total += Math.round(basePrice * conditionMultiplier * item.quantity);
+          // Apply condition modifier
+          const conditionMultiplier = category.conditionMultipliers[item.condition as keyof typeof category.conditionMultipliers] || 0.5;
+          const itemTotal = Math.round(basePrice * conditionMultiplier * item.quantity);
+          
+          newItemEstimates[index] = itemTotal;
+          total += itemTotal;
         }
       }
     });
+
+    setItemEstimates(newItemEstimates);
     setEstimatedTotal(total);
-  }, [watchedItems]);
+  }, [watchedItems, categories]);
 
   const addItem = () => {
     append({ categoryId: '', condition: '', quantity: 1 });
@@ -191,6 +200,20 @@ const NewPickupRequest: React.FC = () => {
   const removeItem = (index: number) => {
     if (fields.length > 1) {
       remove(index);
+      // Remove estimate for this item
+      const newEstimates = { ...itemEstimates };
+      delete newEstimates[index];
+      // Reindex remaining estimates
+      const reindexedEstimates: { [key: number]: number } = {};
+      Object.keys(newEstimates).forEach((key, newIndex) => {
+        const oldIndex = parseInt(key);
+        if (oldIndex > index) {
+          reindexedEstimates[oldIndex - 1] = newEstimates[oldIndex];
+        } else {
+          reindexedEstimates[oldIndex] = newEstimates[oldIndex];
+        }
+      });
+      setItemEstimates(reindexedEstimates);
     }
   };
 
@@ -206,24 +229,69 @@ const NewPickupRequest: React.FC = () => {
     }
   };
 
+  const getSelectedCategory = (categoryId: string) => {
+    return categories.find(c => c._id === categoryId);
+  };
+
   const onSubmit = async (data: FormData) => {
     if (currentStep < 3) {
+      // Validate pincode serviceability before proceeding to step 3
+      if (currentStep === 2 && !pincodeStatus?.serviceable) {
+        showError('Service is not available in your pincode. Please check your pincode or contact support.');
+        return;
+      }
       nextStep();
     } else {
       // Submit the form
+      setIsSubmitting(true);
       try {
-        console.log('Submitting pickup request:', data);
-        // API call would go here
+        // Calculate final pricing
+        const items = data.items.map((item, index) => ({
+          categoryId: item.categoryId,
+          subcategory: item.subcategory || '',
+          brand: item.brand || '',
+          model: item.model || '',
+          condition: item.condition,
+          quantity: item.quantity,
+          estimatedPrice: itemEstimates[index] || 0,
+          description: item.description || ''
+        }));
+
+        const orderData = {
+          items,
+          pickupDetails: {
+            address: {
+              street: data.street,
+              city: data.city,
+              state: data.state,
+              pincode: data.pincode,
+              landmark: data.landmark || ''
+            },
+            preferredDate: data.preferredDate.toISOString(),
+            timeSlot: data.timeSlot,
+            contactNumber: data.contactNumber,
+            specialInstructions: data.specialInstructions || ''
+          },
+          pricing: {
+            estimatedTotal,
+            pickupCharges: 0
+          }
+        };
+
+        await createOrderMutation.mutateAsync(orderData);
+        showSuccess('Pickup request submitted successfully!');
         navigate('/dashboard/pickups');
-      } catch (error) {
-        console.error('Error submitting request:', error);
+      } catch (error: any) {
+        showError(error.response?.data?.message || 'Failed to submit pickup request');
+      } finally {
+        setIsSubmitting(false);
       }
     }
   };
 
-  const getSelectedCategory = (categoryId: string) => {
-    return categories.find(c => c._id === categoryId);
-  };
+  if (categoriesLoading) {
+    return <LoadingSpinner fullScreen />;
+  }
 
   const renderStepContent = () => {
     switch (currentStep) {
@@ -238,6 +306,7 @@ const NewPickupRequest: React.FC = () => {
 
             {fields.map((field, index) => {
               const selectedCategory = getSelectedCategory(watchedItems[index]?.categoryId);
+              const itemEstimate = itemEstimates[index] || 0;
               
               return (
                 <Card key={field.id} variant="bordered" className="p-6">
@@ -249,7 +318,7 @@ const NewPickupRequest: React.FC = () => {
                         size="sm"
                         onClick={() => removeItem(index)}
                       >
-                        <Minus className="h-4 w-4" />
+                        <Trash2 className="h-4 w-4" />
                       </Button>
                     )}
                   </div>
@@ -314,19 +383,23 @@ const NewPickupRequest: React.FC = () => {
                     {...register(`items.${index}.description`)}
                   />
 
-                  {selectedCategory && watchedItems[index]?.condition && watchedItems[index]?.quantity && (
+                  {itemEstimate > 0 && (
                     <div className="mt-4 p-3 bg-green-50 rounded-lg">
                       <p className="text-sm text-green-700">
-                        Estimated value: ₹{(() => {
-                          let basePrice = selectedCategory.basePrice;
-                          const subcategory = selectedCategory.subcategories.find(sub => sub.name === watchedItems[index]?.subcategory);
-                          if (subcategory) {
-                            basePrice *= subcategory.priceModifier;
-                          }
-                          const conditionMultiplier = DEVICE_CONDITIONS.find(c => c.value === watchedItems[index]?.condition)?.multiplier || 0.5;
-                          return Math.round(basePrice * conditionMultiplier * watchedItems[index]?.quantity);
-                        })()}
+                        <span className="font-medium">Estimated value for this item: ₹{itemEstimate.toLocaleString()}</span>
                       </p>
+                      {selectedCategory && (
+                        <div className="mt-2 text-xs text-green-600">
+                          <div>Base price: ₹{selectedCategory.basePrice}</div>
+                          {watchedItems[index]?.subcategory && (
+                            <div>Subcategory modifier: {selectedCategory.subcategories.find(sub => sub.name === watchedItems[index]?.subcategory)?.priceModifier || 1}x</div>
+                          )}
+                          {watchedItems[index]?.condition && (
+                            <div>Condition modifier: {selectedCategory.conditionMultipliers[watchedItems[index]?.condition as keyof typeof selectedCategory.conditionMultipliers] || 0.5}x</div>
+                          )}
+                          <div>Quantity: {watchedItems[index]?.quantity || 1}</div>
+                        </div>
+                      )}
                     </div>
                   )}
                 </Card>
@@ -343,11 +416,14 @@ const NewPickupRequest: React.FC = () => {
             {estimatedTotal > 0 && (
               <Card variant="elevated" className="p-6 bg-green-50">
                 <div className="text-center">
-                  <h3 className="text-lg font-semibold text-green-900 mb-2">Estimated Total Value</h3>
-                  <p className="text-3xl font-bold text-green-600">₹{estimatedTotal}</p>
+                  <h3 className="text-lg font-semibold text-green-900 mb-2">Total Estimated Value</h3>
+                  <p className="text-3xl font-bold text-green-600">₹{estimatedTotal.toLocaleString()}</p>
                   <p className="text-sm text-green-700 mt-2">
                     *Final amount may vary based on actual condition assessment
                   </p>
+                  <div className="mt-3 text-sm text-green-600">
+                    Total items: {watchedItems.length} | Pickup charges: FREE
+                  </div>
                 </div>
               </Card>
             )}
@@ -381,12 +457,21 @@ const NewPickupRequest: React.FC = () => {
                 error={errors.state?.message}
                 {...register('state')}
               />
-              <Input
-                label="Pincode"
-                placeholder="6-digit pincode"
-                error={errors.pincode?.message}
-                {...register('pincode')}
-              />
+              <div>
+                <Input
+                  label="Pincode"
+                  placeholder="6-digit pincode"
+                  error={errors.pincode?.message}
+                  {...register('pincode')}
+                />
+                {pincodeStatus && (
+                  <div className={`mt-2 p-2 rounded text-sm ${
+                    pincodeStatus.serviceable ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
+                  }`}>
+                    {pincodeStatus.message}
+                  </div>
+                )}
+              </div>
             </div>
 
             <Input
@@ -443,18 +528,46 @@ const NewPickupRequest: React.FC = () => {
             {/* Order Summary */}
             <Card variant="elevated" className="p-6 bg-gray-50">
               <h3 className="text-lg font-semibold text-gray-900 mb-4">Order Summary</h3>
-              <div className="space-y-2">
+              <div className="space-y-3">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Total Items:</span>
                   <span className="font-medium">{watchedItems.length}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Estimated Value:</span>
-                  <span className="font-medium text-green-600">₹{estimatedTotal}</span>
+                  <span className="font-medium text-green-600">₹{estimatedTotal.toLocaleString()}</span>
                 </div>
                 <div className="flex justify-between">
                   <span className="text-gray-600">Pickup Charges:</span>
                   <span className="font-medium text-green-600">FREE</span>
+                </div>
+                <div className="border-t pt-2">
+                  <div className="flex justify-between">
+                    <span className="font-semibold text-gray-900">Total Amount:</span>
+                    <span className="font-bold text-green-600">₹{estimatedTotal.toLocaleString()}</span>
+                  </div>
+                </div>
+              </div>
+              
+              {/* Items breakdown */}
+              <div className="mt-4 border-t pt-4">
+                <h4 className="text-sm font-medium text-gray-700 mb-2">Items breakdown:</h4>
+                <div className="space-y-1">
+                  {watchedItems.map((item, index) => {
+                    const category = getSelectedCategory(item.categoryId);
+                    const estimate = itemEstimates[index] || 0;
+                    
+                    if (!category || !item.condition || !item.quantity) return null;
+                    
+                    return (
+                      <div key={index} className="flex justify-between text-sm">
+                        <span className="text-gray-600">
+                          {item.quantity}x {category.name} ({item.condition})
+                        </span>
+                        <span className="text-gray-900">₹{estimate.toLocaleString()}</span>
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
             </Card>
@@ -511,14 +624,19 @@ const NewPickupRequest: React.FC = () => {
           <div className="flex justify-between mt-8 pt-6 border-t border-gray-200">
             <div>
               {currentStep > 1 && (
-                <Button variant="outline" onClick={prevStep}>
+                <Button variant="outline" onClick={prevStep} disabled={isSubmitting}>
                   <ChevronLeft className="mr-2 h-4 w-4" />
                   Previous
                 </Button>
               )}
             </div>
             <div>
-              <Button type="submit" variant="primary">
+              <Button 
+                type="submit" 
+                variant="primary" 
+                loading={isSubmitting}
+                disabled={currentStep === 2 && !pincodeStatus?.serviceable}
+              >
                 {currentStep === 3 ? 'Submit Request' : 'Next'}
                 {currentStep < 3 && <ChevronRight className="ml-2 h-4 w-4" />}
               </Button>

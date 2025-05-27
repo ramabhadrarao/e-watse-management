@@ -1,8 +1,8 @@
 // src/pages/dashboard/OrderDetails.tsx
 // Order Details Page - Detailed view of a specific pickup order
-// Features: order timeline, item details, pickup information, status tracking
+// Features: real-time order data, order timeline, item details, pickup information, status tracking
 
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { 
   ArrowLeft,
@@ -17,121 +17,26 @@ import {
   Copy,
   Download,
   XCircle,
-  AlertCircle
+  AlertCircle,
+  RefreshCw
 } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
+import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import { ORDER_STATUS } from '../../config';
+import { useOrder, useCancelOrder } from '../../hooks/useOrders';
+import { useToast } from '../../hooks/useToast';
 
 const OrderDetails: React.FC = () => {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const [order, setOrder] = useState<any>(null);
-  const [loading, setLoading] = useState(true);
+  const { showSuccess, showError } = useToast();
 
-  // Mock data - replace with actual API call
-  useEffect(() => {
-    const fetchOrder = async () => {
-      setLoading(true);
-      // Simulate API call
-      setTimeout(() => {
-        const mockOrder = {
-          id: id,
-          orderNumber: `EW${id?.padStart(6, '0')}`,
-          status: 'in_transit',
-          createdAt: '2023-06-15T10:30:00Z',
-          items: [
-            {
-              id: '1',
-              categoryName: 'Mobile Phones',
-              subcategory: 'Smartphones',
-              brand: 'Apple',
-              model: 'iPhone 12',
-              condition: 'good',
-              quantity: 1,
-              estimatedPrice: 8000,
-              finalPrice: 7500,
-              description: '64GB, minor scratches on back'
-            },
-            {
-              id: '2',
-              categoryName: 'Laptops',
-              subcategory: 'Business Laptops',
-              brand: 'Dell',
-              model: 'Latitude 7420',
-              condition: 'excellent',
-              quantity: 1,
-              estimatedPrice: 15000,
-              finalPrice: 14000,
-              description: 'i5 processor, 8GB RAM, 256GB SSD'
-            }
-          ],
-          pickupDetails: {
-            address: {
-              street: '123 Main Street, Apartment 4B',
-              city: 'Mumbai',
-              state: 'Maharashtra',
-              pincode: '400001',
-              landmark: 'Near City Mall'
-            },
-            preferredDate: '2023-06-16',
-            timeSlot: 'morning',
-            contactNumber: '+91-98765-43210',
-            specialInstructions: 'Please call before arriving. Building has security.'
-          },
-          pricing: {
-            estimatedTotal: 23000,
-            actualTotal: 21500,
-            pickupCharges: 0,
-            finalAmount: 21500
-          },
-          assignedPickupBoy: {
-            id: 'pb1',
-            firstName: 'Raj',
-            lastName: 'Kumar',
-            phone: '+91-98765-43211',
-            avatar: null
-          },
-          pinVerification: {
-            pin: '123456',
-            isVerified: false
-          },
-          timeline: [
-            {
-              status: 'pending',
-              timestamp: '2023-06-15T10:30:00Z',
-              note: 'Order created',
-              updatedBy: 'customer'
-            },
-            {
-              status: 'confirmed',
-              timestamp: '2023-06-15T11:15:00Z',
-              note: 'Order confirmed and scheduled for pickup',
-              updatedBy: 'admin'
-            },
-            {
-              status: 'assigned',
-              timestamp: '2023-06-15T14:30:00Z',
-              note: 'Assigned to Raj Kumar',
-              updatedBy: 'manager'
-            },
-            {
-              status: 'in_transit',
-              timestamp: '2023-06-16T09:15:00Z',
-              note: 'Pickup boy is on the way',
-              updatedBy: 'pickup_boy'
-            }
-          ]
-        };
-        setOrder(mockOrder);
-        setLoading(false);
-      }, 1000);
-    };
+  // API Hooks
+  const { data: orderData, isLoading, error, refetch } = useOrder(id!);
+  const cancelOrderMutation = useCancelOrder();
 
-    if (id) {
-      fetchOrder();
-    }
-  }, [id]);
+  const order = orderData?.data;
 
   const getStatusInfo = (status: string) => {
     const statusConfig = ORDER_STATUS.find(s => s.value === status);
@@ -149,7 +54,7 @@ const OrderDetails: React.FC = () => {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    // Add toast notification here
+    showSuccess('PIN copied to clipboard');
   };
 
   const formatDate = (dateString: string) => {
@@ -188,30 +93,57 @@ const OrderDetails: React.FC = () => {
     }
   };
 
-  const handleCancelOrder = () => {
-    // Add confirmation dialog and API call
-    console.log('Cancelling order:', id);
+  const handleCancelOrder = async () => {
+    if (!window.confirm('Are you sure you want to cancel this order?')) {
+      return;
+    }
+
+    try {
+      await cancelOrderMutation.mutateAsync({
+        id: order._id,
+        reason: 'Cancelled by customer'
+      });
+      showSuccess('Order cancelled successfully');
+    } catch (error: any) {
+      showError(error.response?.data?.message || 'Failed to cancel order');
+    }
   };
 
-  if (loading) {
-    return (
-      <div className="flex items-center justify-center py-12">
-        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-green-500"></div>
-      </div>
-    );
+  const handleRefresh = () => {
+    refetch();
+    showSuccess('Order details refreshed');
+  };
+
+  if (isLoading) {
+    return <LoadingSpinner fullScreen />;
   }
 
-  if (!order) {
+  if (error || !order) {
     return (
       <div className="text-center py-12">
-        <AlertCircle className="h-16 w-16 text-gray-400 mx-auto mb-4" />
-        <h2 className="text-xl font-semibold text-gray-900 mb-2">Order Not Found</h2>
-        <p className="text-gray-600 mb-6">The requested order could not be found.</p>
-        <Link to="/dashboard/pickups">
-          <Button variant="primary">Back to Orders</Button>
-        </Link>
+        <AlertCircle className="h-16 w-16 text-red-400 mx-auto mb-4" />
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">
+          {error ? 'Failed to Load Order' : 'Order Not Found'}
+        </h2>
+        <p className="text-gray-600 mb-6">
+          {error ? 'Unable to fetch order details. Please try again.' : 'The requested order could not be found.'}
+        </p>
+        <div className="space-x-3">
+          <Button variant="outline" onClick={() => navigate('/dashboard/pickups')}>
+            <ArrowLeft className="h-4 w-4 mr-2" />
+            Back to Orders
+          </Button>
+          {error && (
+            <Button variant="primary" onClick={handleRefresh}>
+              <RefreshCw className="h-4 w-4 mr-2" />
+              Retry
+            </Button>
+          )}
+        </div>
       </div>
-    );
+  };
+
+export default OrderDetails;
   }
 
   return (
@@ -235,6 +167,10 @@ const OrderDetails: React.FC = () => {
           </div>
         </div>
         <div className="flex items-center space-x-3">
+          <Button variant="outline" size="sm" onClick={handleRefresh}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
           <span 
             className="px-3 py-1 text-sm font-medium rounded-full"
             style={{ 
@@ -245,7 +181,12 @@ const OrderDetails: React.FC = () => {
             {getStatusInfo(order.status).label}
           </span>
           {(order.status === 'pending' || order.status === 'confirmed') && (
-            <Button variant="danger" size="sm" onClick={handleCancelOrder}>
+            <Button 
+              variant="danger" 
+              size="sm" 
+              onClick={handleCancelOrder}
+              loading={cancelOrderMutation.isLoading}
+            >
               <XCircle className="h-4 w-4 mr-2" />
               Cancel Order
             </Button>
@@ -263,18 +204,19 @@ const OrderDetails: React.FC = () => {
             </div>
             <div className="p-6">
               <div className="space-y-4">
-                {order.items.map((item: any) => (
-                  <div key={item.id} className="border rounded-lg p-4">
+                {order.items.map((item: any, index: number) => (
+                  <div key={index} className="border rounded-lg p-4">
                     <div className="flex flex-col md:flex-row md:items-center md:justify-between">
                       <div className="flex-1">
                         <div className="flex items-start space-x-3">
                           <Package className="h-5 w-5 text-gray-400 mt-1" />
                           <div>
                             <h3 className="font-medium text-gray-900">
-                              {item.brand} {item.model}
+                              {item.brand && item.model ? `${item.brand} ${item.model}` : 'E-waste Item'}
                             </h3>
                             <p className="text-sm text-gray-600">
-                              {item.categoryName} - {item.subcategory}
+                              {item.categoryId?.name || 'Unknown Category'}
+                              {item.subcategory && ` - ${item.subcategory}`}
                             </p>
                             <div className="flex items-center space-x-4 mt-2">
                               <span className="text-sm text-gray-500">
@@ -292,11 +234,11 @@ const OrderDetails: React.FC = () => {
                       </div>
                       <div className="mt-3 md:mt-0 md:ml-6 text-right">
                         <div className="text-sm text-gray-500">Estimated</div>
-                        <div className="text-lg font-semibold text-gray-900">₹{item.estimatedPrice}</div>
+                        <div className="text-lg font-semibold text-gray-900">₹{item.estimatedPrice?.toLocaleString() || 0}</div>
                         {item.finalPrice && (
                           <>
                             <div className="text-sm text-gray-500 mt-1">Final</div>
-                            <div className="text-lg font-semibold text-green-600">₹{item.finalPrice}</div>
+                            <div className="text-lg font-semibold text-green-600">₹{item.finalPrice.toLocaleString()}</div>
                           </>
                         )}
                       </div>
@@ -381,7 +323,7 @@ const OrderDetails: React.FC = () => {
             <div className="p-6">
               <div className="flow-root">
                 <ul className="-mb-8">
-                  {order.timeline.map((event: any, eventIdx: number) => (
+                  {order.timeline?.map((event: any, eventIdx: number) => (
                     <li key={eventIdx}>
                       <div className="relative pb-8">
                         {eventIdx !== order.timeline.length - 1 ? (
@@ -391,7 +333,7 @@ const OrderDetails: React.FC = () => {
                           <div>
                             <span className={`
                               h-8 w-8 rounded-full flex items-center justify-center ring-8 ring-white
-                              ${eventIdx === 0 ? 'bg-green-500' : 'bg-gray-400'}
+                              ${eventIdx === order.timeline.length - 1 ? 'bg-green-500' : 'bg-gray-400'}
                             `}>
                               {getStatusIcon(event.status)}
                             </span>
@@ -415,7 +357,11 @@ const OrderDetails: React.FC = () => {
                         </div>
                       </div>
                     </li>
-                  ))}
+                  )) || (
+                    <li className="text-center py-4 text-gray-500">
+                      No timeline events available
+                    </li>
+                  )}
                 </ul>
               </div>
             </div>
@@ -433,25 +379,25 @@ const OrderDetails: React.FC = () => {
               <div className="space-y-3">
                 <div className="flex justify-between">
                   <span className="text-gray-600">Estimated Total:</span>
-                  <span className="font-medium">₹{order.pricing.estimatedTotal}</span>
+                  <span className="font-medium">₹{order.pricing?.estimatedTotal?.toLocaleString() || 0}</span>
                 </div>
-                {order.pricing.actualTotal && (
+                {order.pricing?.actualTotal && order.pricing.actualTotal > 0 && (
                   <div className="flex justify-between">
                     <span className="text-gray-600">Actual Total:</span>
-                    <span className="font-medium text-green-600">₹{order.pricing.actualTotal}</span>
+                    <span className="font-medium text-green-600">₹{order.pricing.actualTotal.toLocaleString()}</span>
                   </div>
                 )}
                 <div className="flex justify-between">
                   <span className="text-gray-600">Pickup Charges:</span>
                   <span className="font-medium text-green-600">
-                    {order.pricing.pickupCharges === 0 ? 'FREE' : `₹${order.pricing.pickupCharges}`}
+                    {(order.pricing?.pickupCharges || 0) === 0 ? 'FREE' : `₹${order.pricing.pickupCharges}`}
                   </span>
                 </div>
                 <div className="border-t pt-3">
                   <div className="flex justify-between">
                     <span className="font-semibold text-gray-900">Final Amount:</span>
                     <span className="font-bold text-green-600">
-                      ₹{order.pricing.finalAmount || order.pricing.estimatedTotal}
+                      ₹{(order.pricing?.finalAmount || order.pricing?.actualTotal || order.pricing?.estimatedTotal || 0).toLocaleString()}
                     </span>
                   </div>
                 </div>
@@ -488,7 +434,8 @@ const OrderDetails: React.FC = () => {
           )}
 
           {/* PIN Display */}
-          {(order.status === 'assigned' || order.status === 'in_transit') && !order.pinVerification.isVerified && (
+          {(order.status === 'assigned' || order.status === 'in_transit') && 
+           order.pinVerification && !order.pinVerification.isVerified && (
             <Card variant="elevated">
               <div className="px-6 py-4 border-b border-gray-200">
                 <h2 className="text-lg font-semibold text-gray-900">Pickup PIN</h2>
@@ -539,6 +486,5 @@ const OrderDetails: React.FC = () => {
       </div>
     </div>
   );
-};
 
 export default OrderDetails;

@@ -1,90 +1,29 @@
 // src/pages/dashboard/MyPickups.tsx
 // My Pickups Dashboard Page - Displays user's pickup orders with filtering and status tracking
-// Features: status filtering, order details, pickup tracking, order actions
+// Features: real-time API data, status filtering, order details, pickup tracking, order actions
 
 import React, { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { Package, Truck, Clock, CheckCircle, XCircle, Eye, Calendar, MapPin, Phone, Copy } from 'lucide-react';
+import { Package, Truck, Clock, CheckCircle, XCircle, Eye, Calendar, MapPin, Phone, Copy, RefreshCw } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Select from '../../components/ui/Select';
+import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import { ORDER_STATUS } from '../../config';
+import { useUserOrders, useCancelOrder } from '../../hooks/useOrders';
+import { useToast } from '../../hooks/useToast';
 
 const MyPickups: React.FC = () => {
   const [statusFilter, setStatusFilter] = useState('all');
   const [sortBy, setSortBy] = useState('newest');
+  
+  const { showSuccess, showError } = useToast();
+  
+  // API Hooks
+  const { data: ordersData, isLoading, error, refetch } = useUserOrders();
+  const cancelOrderMutation = useCancelOrder();
 
-  // Mock data - replace with actual API call
-  const pickups = [
-    {
-      id: 'EW000123',
-      orderNumber: 'EW000123',
-      date: '2023-06-15',
-      status: 'completed',
-      items: [
-        { categoryName: 'Mobile Phones', quantity: 2, condition: 'good' },
-        { categoryName: 'Laptops', quantity: 1, condition: 'fair' }
-      ],
-      pickupAddress: {
-        street: '123 Main Street',
-        city: 'Mumbai',
-        pincode: '400001'
-      },
-      estimatedAmount: 1200,
-      finalAmount: 1150,
-      pickupDate: '2023-06-16',
-      timeSlot: 'morning',
-      pin: '123456',
-      assignedPickupBoy: {
-        name: 'Raj Kumar',
-        phone: '+91-98765-43210'
-      }
-    },
-    {
-      id: 'EW000145',
-      orderNumber: 'EW000145',
-      date: '2023-06-18',
-      status: 'in_transit',
-      items: [
-        { categoryName: 'Desktop Computers', quantity: 1, condition: 'excellent' },
-        { categoryName: 'Printers', quantity: 1, condition: 'good' }
-      ],
-      pickupAddress: {
-        street: '456 Park Avenue',
-        city: 'Mumbai',
-        pincode: '400002'
-      },
-      estimatedAmount: 2500,
-      finalAmount: null,
-      pickupDate: '2023-06-20',
-      timeSlot: 'afternoon',
-      pin: '789012',
-      assignedPickupBoy: {
-        name: 'Amit Sharma',
-        phone: '+91-98765-43211'
-      }
-    },
-    {
-      id: 'EW000167',
-      orderNumber: 'EW000167',
-      date: '2023-06-20',
-      status: 'confirmed',
-      items: [
-        { categoryName: 'Mobile Phones', quantity: 3, condition: 'poor' },
-        { categoryName: 'Batteries', quantity: 5, condition: 'broken' }
-      ],
-      pickupAddress: {
-        street: '789 Garden Road',
-        city: 'Mumbai',
-        pincode: '400003'
-      },
-      estimatedAmount: 800,
-      finalAmount: null,
-      pickupDate: '2023-06-22',
-      timeSlot: 'evening',
-      pin: '345678'
-    }
-  ];
+  const orders = ordersData?.data || [];
 
   const getStatusInfo = (status: string) => {
     const statusConfig = ORDER_STATUS.find(s => s.value === status);
@@ -109,18 +48,56 @@ const MyPickups: React.FC = () => {
 
   const copyToClipboard = (text: string) => {
     navigator.clipboard.writeText(text);
-    // You can add a toast notification here
+    showSuccess('PIN copied to clipboard');
   };
 
-  const filteredPickups = pickups.filter(pickup => 
-    statusFilter === 'all' || pickup.status === statusFilter
+  const formatDate = (dateString: string) => {
+    return new Date(dateString).toLocaleDateString('en-IN', {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric'
+    });
+  };
+
+  const getTimeSlotLabel = (timeSlot: string) => {
+    const slots = {
+      morning: 'Morning (9 AM - 12 PM)',
+      afternoon: 'Afternoon (12 PM - 4 PM)',
+      evening: 'Evening (4 PM - 7 PM)'
+    };
+    return slots[timeSlot as keyof typeof slots] || timeSlot;
+  };
+
+  const handleCancelOrder = async (orderId: string) => {
+    if (!window.confirm('Are you sure you want to cancel this order?')) {
+      return;
+    }
+
+    try {
+      await cancelOrderMutation.mutateAsync({ 
+        id: orderId, 
+        reason: 'Cancelled by customer' 
+      });
+      showSuccess('Order cancelled successfully');
+    } catch (error: any) {
+      showError(error.response?.data?.message || 'Failed to cancel order');
+    }
+  };
+
+  const handleRefresh = () => {
+    refetch();
+    showSuccess('Orders refreshed');
+  };
+
+  const filteredOrders = orders.filter(order => 
+    statusFilter === 'all' || order.status === statusFilter
   );
 
-  const sortedPickups = [...filteredPickups].sort((a, b) => {
+  const sortedOrders = [...filteredOrders].sort((a, b) => {
     if (sortBy === 'newest') {
-      return new Date(b.date).getTime() - new Date(a.date).getTime();
+      return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     } else {
-      return new Date(a.date).getTime() - new Date(b.date).getTime();
+      return new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
     }
   });
 
@@ -134,6 +111,24 @@ const MyPickups: React.FC = () => {
     { value: 'oldest', label: 'Oldest First' }
   ];
 
+  if (isLoading) {
+    return <LoadingSpinner fullScreen />;
+  }
+
+  if (error) {
+    return (
+      <div className="text-center py-12">
+        <XCircle className="h-16 w-16 text-red-400 mx-auto mb-4" />
+        <h2 className="text-xl font-semibold text-gray-900 mb-2">Failed to Load Orders</h2>
+        <p className="text-gray-600 mb-6">Unable to fetch your pickup orders. Please try again.</p>
+        <Button variant="primary" onClick={handleRefresh}>
+          <RefreshCw className="h-4 w-4 mr-2" />
+          Retry
+        </Button>
+      </div>
+    );
+  }
+
   return (
     <div>
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
@@ -141,7 +136,11 @@ const MyPickups: React.FC = () => {
           <h1 className="text-2xl font-bold text-gray-900">My Pickups</h1>
           <p className="text-gray-600">Track and manage your e-waste pickup orders</p>
         </div>
-        <div className="mt-4 md:mt-0">
+        <div className="mt-4 md:mt-0 flex space-x-3">
+          <Button variant="outline" size="sm" onClick={handleRefresh}>
+            <RefreshCw className="h-4 w-4 mr-2" />
+            Refresh
+          </Button>
           <Link to="/dashboard/request">
             <Button variant="primary">
               <Package className="mr-2 h-5 w-5" />
@@ -168,53 +167,53 @@ const MyPickups: React.FC = () => {
           />
           <div className="flex items-end">
             <div className="text-sm text-gray-600">
-              Showing {sortedPickups.length} of {pickups.length} orders
+              Showing {sortedOrders.length} of {orders.length} orders
             </div>
           </div>
         </div>
       </Card>
 
-      {/* Pickups List */}
+      {/* Orders List */}
       <div className="space-y-6">
-        {sortedPickups.map((pickup) => (
-          <Card key={pickup.id} variant="elevated" className="overflow-hidden">
+        {sortedOrders.map((order) => (
+          <Card key={order._id} variant="elevated" className="overflow-hidden">
             <div className="p-6">
               <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between">
                 <div className="flex-1">
                   {/* Header */}
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center space-x-3">
-                      {getStatusIcon(pickup.status)}
+                      {getStatusIcon(order.status)}
                       <div>
                         <h3 className="text-lg font-semibold text-gray-900">
-                          Order #{pickup.orderNumber}
+                          Order #{order.orderNumber}
                         </h3>
                         <p className="text-sm text-gray-600">
-                          Ordered on {new Date(pickup.date).toLocaleDateString()}
+                          Ordered on {formatDate(order.createdAt)}
                         </p>
                       </div>
                     </div>
                     <span 
                       className="px-3 py-1 text-xs font-medium rounded-full"
                       style={{ 
-                        backgroundColor: `${getStatusInfo(pickup.status).color}20`,
-                        color: getStatusInfo(pickup.status).color 
+                        backgroundColor: `${getStatusInfo(order.status).color}20`,
+                        color: getStatusInfo(order.status).color 
                       }}
                     >
-                      {getStatusInfo(pickup.status).label}
+                      {getStatusInfo(order.status).label}
                     </span>
                   </div>
 
                   {/* Items */}
                   <div className="mb-4">
-                    <h4 className="text-sm font-medium text-gray-700 mb-2">Items:</h4>
+                    <h4 className="text-sm font-medium text-gray-700 mb-2">Items ({order.items.length}):</h4>
                     <div className="flex flex-wrap gap-2">
-                      {pickup.items.map((item, index) => (
+                      {order.items.map((item, index) => (
                         <span 
                           key={index}
                           className="px-3 py-1 bg-gray-100 text-gray-700 text-sm rounded-full"
                         >
-                          {item.quantity}x {item.categoryName} ({item.condition})
+                          {item.quantity}x {item.categoryId?.name || 'Unknown'} ({item.condition})
                         </span>
                       ))}
                     </div>
@@ -227,7 +226,7 @@ const MyPickups: React.FC = () => {
                       <div className="text-sm">
                         <p className="font-medium text-gray-700">Pickup Address:</p>
                         <p className="text-gray-600">
-                          {pickup.pickupAddress.street}, {pickup.pickupAddress.city} - {pickup.pickupAddress.pincode}
+                          {order.pickupDetails.address.street}, {order.pickupDetails.address.city} - {order.pickupDetails.address.pincode}
                         </p>
                       </div>
                     </div>
@@ -236,7 +235,7 @@ const MyPickups: React.FC = () => {
                       <div className="text-sm">
                         <p className="font-medium text-gray-700">Pickup Schedule:</p>
                         <p className="text-gray-600">
-                          {new Date(pickup.pickupDate).toLocaleDateString()} - {pickup.timeSlot}
+                          {formatDate(order.pickupDetails.preferredDate)} - {getTimeSlotLabel(order.pickupDetails.timeSlot)}
                         </p>
                       </div>
                     </div>
@@ -246,47 +245,50 @@ const MyPickups: React.FC = () => {
                   <div className="flex items-center justify-between mb-4">
                     <div className="text-sm">
                       <span className="text-gray-600">Estimated Amount: </span>
-                      <span className="font-semibold text-gray-900">₹{pickup.estimatedAmount}</span>
+                      <span className="font-semibold text-gray-900">₹{order.pricing.estimatedTotal.toLocaleString()}</span>
                     </div>
-                    {pickup.finalAmount && (
+                    {order.pricing.actualTotal > 0 && (
                       <div className="text-sm">
                         <span className="text-gray-600">Final Amount: </span>
-                        <span className="font-semibold text-green-600">₹{pickup.finalAmount}</span>
+                        <span className="font-semibold text-green-600">₹{order.pricing.actualTotal.toLocaleString()}</span>
                       </div>
                     )}
                   </div>
 
                   {/* Pickup Boy Info */}
-                  {pickup.assignedPickupBoy && (
+                  {order.assignedPickupBoy && (
                     <div className="bg-blue-50 rounded-lg p-3 mb-4">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center space-x-2">
                           <Truck className="h-4 w-4 text-blue-600" />
                           <div className="text-sm">
                             <p className="font-medium text-blue-900">Pickup Boy Assigned:</p>
-                            <p className="text-blue-700">{pickup.assignedPickupBoy.name}</p>
+                            <p className="text-blue-700">
+                              {order.assignedPickupBoy.firstName} {order.assignedPickupBoy.lastName}
+                            </p>
                           </div>
                         </div>
                         <div className="flex items-center space-x-2">
                           <Phone className="h-4 w-4 text-blue-600" />
-                          <span className="text-sm text-blue-700">{pickup.assignedPickupBoy.phone}</span>
+                          <span className="text-sm text-blue-700">{order.assignedPickupBoy.phone}</span>
                         </div>
                       </div>
                     </div>
                   )}
 
                   {/* PIN Display */}
-                  {pickup.status === 'assigned' || pickup.status === 'in_transit' ? (
+                  {(order.status === 'assigned' || order.status === 'in_transit') && 
+                   order.pinVerification && !order.pinVerification.isVerified && (
                     <div className="bg-amber-50 rounded-lg p-3 mb-4">
                       <div className="flex items-center justify-between">
                         <div>
                           <p className="text-sm font-medium text-amber-900">Pickup PIN:</p>
-                          <p className="text-lg font-bold text-amber-700 font-mono">{pickup.pin}</p>
+                          <p className="text-lg font-bold text-amber-700 font-mono">{order.pinVerification.pin}</p>
                         </div>
                         <Button 
                           variant="outline" 
                           size="sm"
-                          onClick={() => copyToClipboard(pickup.pin)}
+                          onClick={() => copyToClipboard(order.pinVerification.pin)}
                         >
                           <Copy className="h-4 w-4 mr-1" />
                           Copy
@@ -296,30 +298,36 @@ const MyPickups: React.FC = () => {
                         Share this PIN with the pickup boy for verification
                       </p>
                     </div>
-                  ) : null}
+                  )}
                 </div>
 
                 {/* Actions */}
                 <div className="mt-4 lg:mt-0 lg:ml-6 flex flex-col space-y-2">
-                  <Link to={`/dashboard/pickups/${pickup.id}`}>
+                  <Link to={`/dashboard/pickups/${order._id}`}>
                     <Button variant="outline" size="sm" fullWidth>
                       <Eye className="mr-2 h-4 w-4" />
                       View Details
                     </Button>
                   </Link>
-                  {pickup.status === 'pending' || pickup.status === 'confirmed' ? (
-                    <Button variant="danger" size="sm" fullWidth>
+                  {(order.status === 'pending' || order.status === 'confirmed') && (
+                    <Button 
+                      variant="danger" 
+                      size="sm" 
+                      fullWidth
+                      onClick={() => handleCancelOrder(order._id)}
+                      loading={cancelOrderMutation.isLoading}
+                    >
                       <XCircle className="mr-2 h-4 w-4" />
                       Cancel Order
                     </Button>
-                  ) : null}
+                  )}
                 </div>
               </div>
             </div>
           </Card>
         ))}
 
-        {sortedPickups.length === 0 && (
+        {sortedOrders.length === 0 && (
           <Card variant="elevated" className="text-center py-12">
             <Package className="h-16 w-16 text-gray-300 mx-auto mb-4" />
             <h3 className="text-lg font-medium text-gray-900 mb-2">No pickups found</h3>
