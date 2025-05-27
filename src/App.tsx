@@ -1,5 +1,18 @@
 // src/App.tsx
-// Fixed App component with proper imports and routing
+// Complete App component with proper imports and routing including all admin and pickup boy routes
+// Features: Public pages, protected dashboard routes, role-based access, admin management, pickup boy interface
+// Dependencies: React Router, React Query, Toast notifications, Authentication context
+
+import React from 'react';
+import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
+import { ToastContainer } from 'react-toastify';
+import { QueryClient, QueryClientProvider } from 'react-query';
+import 'react-toastify/dist/ReactToastify.css';
+
+// Layouts
+import MainLayout from './layouts/MainLayout';
+import// src/App.tsx
+// Fixed App component with proper imports and routing including all admin and pickup boy routes
 
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
@@ -26,6 +39,15 @@ import MyPickups from './pages/dashboard/MyPickups';
 import NewPickupRequest from './pages/dashboard/NewPickupRequest';
 import UserProfile from './pages/dashboard/UserProfile';
 import OrderDetails from './pages/dashboard/OrderDetails';
+import SupportTickets from './pages/dashboard/SupportTickets';
+
+// Admin Pages
+import AdminDashboard from './pages/dashboard/AdminDashboard';
+import UserManagement from './pages/dashboard/admin/UserManagement';
+import Analytics from './pages/dashboard/admin/Analytics';
+
+// Pickup Boy Pages
+import PickupBoyDashboard from './pages/dashboard/pickup/PickupBoyDashboard';
 
 // Context
 import { AuthProvider } from './context/AuthContext';
