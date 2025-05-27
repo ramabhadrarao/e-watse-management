@@ -1,17 +1,4 @@
 // src/App.tsx
-// Complete App component with proper imports and routing including all admin and pickup boy routes
-// Features: Public pages, protected dashboard routes, role-based access, admin management, pickup boy interface
-// Dependencies: React Router, React Query, Toast notifications, Authentication context
-
-import React from 'react';
-import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
-import { ToastContainer } from 'react-toastify';
-import { QueryClient, QueryClientProvider } from 'react-query';
-import 'react-toastify/dist/ReactToastify.css';
-
-// Layouts
-import MainLayout from './layouts/MainLayout';
-import// src/App.tsx
 // Fixed App component with proper imports and routing including all admin and pickup boy routes
 
 import React from 'react';
@@ -99,14 +86,51 @@ function App() {
                 </PrivateRoute>
               }
             >
-              {/* Default dashboard route */}
+              {/* Default dashboard route - role-based */}
               <Route index element={<UserDashboard />} />
               
               {/* Customer Routes */}
               <Route path="pickups" element={<MyPickups />} />
               <Route path="pickups/:id" element={<OrderDetails />} />
               <Route path="request" element={<NewPickupRequest />} />
+              <Route path="support" element={<SupportTickets />} />
               <Route path="profile" element={<UserProfile />} />
+              
+              {/* Admin Routes */}
+              <Route 
+                path="admin" 
+                element={
+                  <PrivateRoute requiredRole="admin,manager">
+                    <AdminDashboard />
+                  </PrivateRoute>
+                } 
+              />
+              <Route 
+                path="users" 
+                element={
+                  <PrivateRoute requiredRole="admin,manager">
+                    <UserManagement />
+                  </PrivateRoute>
+                } 
+              />
+              <Route 
+                path="analytics" 
+                element={
+                  <PrivateRoute requiredRole="admin,manager">
+                    <Analytics />
+                  </PrivateRoute>
+                } 
+              />
+              
+              {/* Pickup Boy Routes */}
+              <Route 
+                path="assigned" 
+                element={
+                  <PrivateRoute requiredRole="pickup_boy">
+                    <PickupBoyDashboard />
+                  </PrivateRoute>
+                } 
+              />
             </Route>
             
             {/* 404 Route */}

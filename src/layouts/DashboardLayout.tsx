@@ -42,7 +42,7 @@ const DashboardLayout: React.FC = () => {
       case 'admin':
         return [
           ...baseItems,
-          { name: 'Orders Management', icon: <Package />, href: '/dashboard/admin' },
+          { name: 'Admin Panel', icon: <Shield />, href: '/dashboard/admin' },
           { name: 'User Management', icon: <Users />, href: '/dashboard/users' },
           { name: 'Support Tickets', icon: <MessageCircle />, href: '/dashboard/support' },
           { name: 'Analytics', icon: <BarChart3 />, href: '/dashboard/analytics' },
@@ -52,7 +52,7 @@ const DashboardLayout: React.FC = () => {
       case 'manager':
         return [
           ...baseItems,
-          { name: 'Orders Management', icon: <Package />, href: '/dashboard/manage' },
+          { name: 'Order Management', icon: <Package />, href: '/dashboard/admin' },
           { name: 'Support Tickets', icon: <MessageCircle />, href: '/dashboard/support' },
           { name: 'Pickup Areas', icon: <MapPin />, href: '/dashboard/areas' },
           { name: 'Analytics', icon: <BarChart3 />, href: '/dashboard/analytics' },
