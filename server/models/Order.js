@@ -3,8 +3,8 @@ import mongoose from 'mongoose';
 const orderSchema = new mongoose.Schema({
   orderNumber: {
     type: String,
-    unique: true,
-    required: true
+    unique: true
+    // Removed required: true since we'll generate it in pre-save
   },
   customerId: {
     type: mongoose.Schema.Types.ObjectId,
@@ -84,10 +84,7 @@ const orderSchema = new mongoose.Schema({
     ref: 'User'
   },
   pinVerification: {
-    pin: {
-      type: String,
-      length: 6
-    },
+    pin: String,
     isVerified: {
       type: Boolean,
       default: false
@@ -142,21 +139,31 @@ const orderSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Generate order number before saving
+// Generate order number and PIN before saving
 orderSchema.pre('save', async function(next) {
+  // Only generate for new documents
   if (this.isNew) {
-    const count = await this.constructor.countDocuments();
-    this.orderNumber = `EW${String(count + 1).padStart(6, '0')}`;
-    
-    // Generate PIN for verification
-    this.pinVerification.pin = Math.floor(100000 + Math.random() * 900000).toString();
-    
-    // Add to timeline
-    this.timeline.push({
-      status: 'pending',
-      timestamp: Date.now(),
-      note: 'Order created'
-    });
+    try {
+      // Generate unique order number
+      const count = await this.constructor.countDocuments();
+      this.orderNumber = `EW${String(count + 1).padStart(6, '0')}`;
+      
+      // Generate PIN for verification (6 digits)
+      this.pinVerification = {
+        pin: Math.floor(100000 + Math.random() * 900000).toString(),
+        isVerified: false
+      };
+      
+      // Initialize timeline with first entry
+      this.timeline = [{
+        status: 'pending',
+        timestamp: new Date(),
+        note: 'Order created'
+      }];
+      
+    } catch (error) {
+      return next(error);
+    }
   }
   next();
 });

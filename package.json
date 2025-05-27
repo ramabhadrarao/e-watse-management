@@ -12,7 +12,9 @@
     "server:dev": "nodemon server/index.js",
     "dev:full": "concurrently \"npm run dev\" \"npm run server:dev\"",
     "seed": "node server/seed/seedDatabase.js",
-    "setup": "npm install && npm run seed"
+    "setup": "npm install && npm run seed",
+    "test:order": "node test/testOrderCreation.js",
+    "test:api": "node debug/testOrderAPI.js"
   },
   "dependencies": {
     "lucide-react": "^0.344.0",

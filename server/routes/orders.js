@@ -23,7 +23,10 @@ router.route('/')
   .post(createOrder)
   .get(getUserOrders);
 
+// Get single order by ID
 router.get('/:id', getOrder);
+
+// Cancel order
 router.put('/:id/cancel', cancelOrder);
 
 // Admin/Manager routes

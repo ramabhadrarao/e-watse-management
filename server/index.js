@@ -21,38 +21,61 @@ dotenv.config();
 // Initialize express app
 const app = express();
 
-// Connect to MongoDB
-mongoose.connect(process.env.MONGO_URI)
+// Connect to MongoDB with options to suppress warnings
+mongoose.connect(process.env.MONGO_URI, {
+  useNewUrlParser: true,
+  useUnifiedTopology: true,
+})
   .then(() => console.log('MongoDB Connected'))
   .catch(err => console.error('MongoDB Connection Error:', err));
 
+// Suppress mongoose duplicate index warning
+mongoose.set('strictQuery', false);
+
 // Middleware
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
 app.use(cookieParser());
 app.use(cors({
-  origin: 'http://localhost:5173', // Frontend URL
+  origin: process.env.FRONTEND_URL || 'http://localhost:5173',
   credentials: true
 }));
+
+// Home route
+app.get('/', (req, res) => {
+  res.json({ 
+    success: true, 
+    message: 'E-Waste Management API is running',
+    version: '1.0.0',
+    endpoints: {
+      auth: '/api/auth',
+      users: '/api/users', 
+      categories: '/api/categories',
+      orders: '/api/orders',
+      pincodes: '/api/pincodes',
+      pages: '/api/pages'
+    }
+  });
+});
 
 // Mount routes
 app.use('/api/auth', authRoutes);
 app.use('/api/users', userRoutes);
-app.use('/api/pincodes', pincodeRoutes);
 app.use('/api/categories', categoryRoutes);
-app.use('/api/orders', orderRoutes);
+app.use('/api/pincodes', pincodeRoutes);
+app.use('/api/orders', orderRoutes);  // Make sure this comes after auth routes
 app.use('/api/pages', pageRoutes);
 
-// Home route
-app.get('/', (req, res) => {
-  res.send('E-Waste Management API is running');
-});
-
-// Error handler middleware
+// Error handler middleware (should be last)
 app.use(errorHandler);
 
 // Start server
 const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+app.listen(PORT, () => {
+  console.log(`🚀 Server running on port ${PORT}`);
+  console.log(`📱 Frontend URL: ${process.env.FRONTEND_URL || 'http://localhost:5173'}`);
+  console.log(`🔗 API URL: http://localhost:${PORT}`);
+});
 
 // Handle unhandled promise rejections
 process.on('unhandledRejection', (err) => {

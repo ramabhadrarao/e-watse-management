@@ -10,43 +10,89 @@ import { ErrorResponse } from '../utils/errorResponse.js';
 export const createOrder = asyncHandler(async (req, res, next) => {
   const { items, pickupDetails, pricing } = req.body;
 
-  // Validate items and calculate pricing
-  let estimatedTotal = 0;
-  
-  for (let item of items) {
-    const category = await Category.findById(item.categoryId);
-    if (!category) {
-      return next(new ErrorResponse(`Category not found with id of ${item.categoryId}`, 404));
-    }
+  try {
+    // Validate items and calculate pricing
+    let estimatedTotal = 0;
+    const processedItems = [];
     
-    // Calculate estimated price based on category and condition
-    let basePrice = category.basePrice;
-    if (item.subcategory) {
-      const subcategory = category.subcategories.find(sub => sub.name === item.subcategory);
-      if (subcategory) {
-        basePrice *= subcategory.priceModifier;
+    for (let item of items) {
+      const category = await Category.findById(item.categoryId);
+      if (!category) {
+        return next(new ErrorResponse(`Category not found with id of ${item.categoryId}`, 404));
       }
+      
+      // Calculate estimated price based on category and condition
+      let basePrice = category.basePrice;
+      
+      // Apply subcategory modifier if specified
+      if (item.subcategory) {
+        const subcategory = category.subcategories.find(sub => sub.name === item.subcategory);
+        if (subcategory) {
+          basePrice *= subcategory.priceModifier;
+        }
+      }
+      
+      // Apply condition modifier
+      const conditionMultiplier = category.conditionMultipliers[item.condition] || 0.5;
+      const itemEstimatedPrice = Math.round(basePrice * conditionMultiplier * item.quantity);
+      
+      // Prepare item for database
+      const processedItem = {
+        categoryId: item.categoryId,
+        subcategory: item.subcategory || '',
+        brand: item.brand || '',
+        model: item.model || '',
+        condition: item.condition,
+        quantity: item.quantity,
+        estimatedPrice: itemEstimatedPrice,
+        description: item.description || ''
+      };
+      
+      processedItems.push(processedItem);
+      estimatedTotal += itemEstimatedPrice;
     }
-    
-    const conditionMultiplier = category.conditionMultipliers[item.condition] || 0.5;
-    item.estimatedPrice = Math.round(basePrice * conditionMultiplier * item.quantity);
-    estimatedTotal += item.estimatedPrice;
+
+    // Create order object
+    const orderData = {
+      customerId: req.user.id,
+      items: processedItems,
+      pickupDetails: {
+        address: {
+          street: pickupDetails.address.street,
+          city: pickupDetails.address.city,
+          state: pickupDetails.address.state,
+          pincode: pickupDetails.address.pincode,
+          landmark: pickupDetails.address.landmark || ''
+        },
+        preferredDate: new Date(pickupDetails.preferredDate),
+        timeSlot: pickupDetails.timeSlot,
+        contactNumber: pickupDetails.contactNumber,
+        specialInstructions: pickupDetails.specialInstructions || ''
+      },
+      pricing: {
+        estimatedTotal,
+        pickupCharges: pricing?.pickupCharges || 0,
+        finalAmount: estimatedTotal + (pricing?.pickupCharges || 0)
+      }
+    };
+
+    // Create the order
+    const order = await Order.create(orderData);
+
+    // Populate the created order for response
+    const populatedOrder = await Order.findById(order._id)
+      .populate('items.categoryId', 'name icon')
+      .populate('customerId', 'firstName lastName email phone');
+
+    res.status(201).json({
+      success: true,
+      data: populatedOrder
+    });
+
+  } catch (error) {
+    console.error('Order creation error:', error);
+    return next(new ErrorResponse('Failed to create order', 500));
   }
-
-  const order = await Order.create({
-    customerId: req.user.id,
-    items,
-    pickupDetails,
-    pricing: {
-      estimatedTotal,
-      ...pricing
-    }
-  });
-
-  res.status(201).json({
-    success: true,
-    data: order
-  });
 });
 
 // @desc    Get user orders
@@ -114,7 +160,7 @@ export const cancelOrder = asyncHandler(async (req, res, next) => {
   order.status = 'cancelled';
   order.timeline.push({
     status: 'cancelled',
-    timestamp: Date.now(),
+    timestamp: new Date(),
     updatedBy: req.user.id,
     note: req.body.reason || 'Order cancelled by customer'
   });
@@ -154,10 +200,10 @@ export const getAllOrders = asyncHandler(async (req, res, next) => {
   // Pagination result
   const pagination = {};
   if (endIndex < total) {
-    pagination.next = { page: page + 1, limit };
+    pagination.next = { page: parseInt(page) + 1, limit: parseInt(limit) };
   }
   if (startIndex > 0) {
-    pagination.prev = { page: page - 1, limit };
+    pagination.prev = { page: parseInt(page) - 1, limit: parseInt(limit) };
   }
 
   res.status(200).json({
@@ -189,7 +235,7 @@ export const updateOrderStatus = asyncHandler(async (req, res, next) => {
   order.status = status;
   order.timeline.push({
     status,
-    timestamp: Date.now(),
+    timestamp: new Date(),
     updatedBy: req.user.id,
     note: note || `Status updated to ${status}`
   });
@@ -224,7 +270,7 @@ export const assignPickupBoy = asyncHandler(async (req, res, next) => {
   order.status = 'assigned';
   order.timeline.push({
     status: 'assigned',
-    timestamp: Date.now(),
+    timestamp: new Date(),
     updatedBy: req.user.id,
     note: `Assigned to ${pickupBoy.firstName} ${pickupBoy.lastName}`
   });
@@ -279,11 +325,11 @@ export const verifyPickupPin = asyncHandler(async (req, res, next) => {
   }
 
   order.pinVerification.isVerified = true;
-  order.pinVerification.verifiedAt = Date.now();
+  order.pinVerification.verifiedAt = new Date();
   order.status = 'picked_up';
   order.timeline.push({
     status: 'picked_up',
-    timestamp: Date.now(),
+    timestamp: new Date(),
     updatedBy: req.user.id,
     note: 'PIN verified and items picked up'
   });
