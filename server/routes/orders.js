@@ -1,4 +1,4 @@
-// server/routes/orders.js
+// server/routes/orders.js - Enhanced with receipt
 import express from 'express';
 import {
   createOrder,
@@ -9,7 +9,8 @@ import {
   updateOrderStatus,
   assignPickupBoy,
   getAssignedOrders,
-  verifyPickupPin
+  verifyPickupPin,
+  generateOrderReceipt
 } from '../controllers/orders.js';
 import { protect, authorize } from '../middleware/auth.js';
 
@@ -25,6 +26,9 @@ router.route('/')
 
 // Get single order by ID
 router.get('/:id', getOrder);
+
+// Generate receipt
+router.get('/:id/receipt', generateOrderReceipt);
 
 // Cancel order
 router.put('/:id/cancel', cancelOrder);

@@ -1,7 +1,11 @@
+// server/controllers/auth.js
+// Enhanced authentication controller with email integration
+
 import User from '../models/User.js';
 import jwt from 'jsonwebtoken';
 import { asyncHandler } from '../middleware/async.js';
 import { ErrorResponse } from '../utils/errorResponse.js';
+import { emailService } from '../services/emailService.js';
 
 // @desc    Register user
 // @route   POST /api/auth/register
@@ -26,6 +30,15 @@ export const register = asyncHandler(async (req, res, next) => {
     role: role || 'customer',
   });
 
+  // Send welcome email
+  try {
+    await emailService.sendWelcomeEmail(user);
+    console.log('Welcome email sent successfully');
+  } catch (emailError) {
+    console.error('Failed to send welcome email:', emailError);
+    // Don't fail registration if email fails
+  }
+
   sendTokenResponse(user, 201, res);
 });
 
@@ -44,6 +57,11 @@ export const login = asyncHandler(async (req, res, next) => {
   const user = await User.findOne({ email }).select('+password');
   if (!user) {
     return next(new ErrorResponse('Invalid credentials', 401));
+  }
+
+  // Check if user is active
+  if (!user.isActive) {
+    return next(new ErrorResponse('Account is deactivated. Please contact support.', 401));
   }
 
   // Check if password matches
@@ -150,6 +168,80 @@ export const updatePassword = asyncHandler(async (req, res, next) => {
   }
 
   user.password = req.body.newPassword;
+  await user.save();
+
+  sendTokenResponse(user, 200, res);
+});
+
+// @desc    Forgot password
+// @route   POST /api/auth/forgotpassword
+// @access  Public
+export const forgotPassword = asyncHandler(async (req, res, next) => {
+  const user = await User.findOne({ email: req.body.email });
+
+  if (!user) {
+    return next(new ErrorResponse('There is no user with that email', 404));
+  }
+
+  // Get reset token
+  const resetToken = user.getResetPasswordToken();
+  await user.save({ validateBeforeSave: false });
+
+  // Create reset URL
+  const resetUrl = `${req.protocol}://${req.get('host')}/api/auth/resetpassword/${resetToken}`;
+
+  try {
+    await emailService.sendCustomEmail(
+      user.email,
+      'Password Reset Request',
+      `
+        <h2>Password Reset Request</h2>
+        <p>You have requested a password reset for your account.</p>
+        <p>Please click the link below to reset your password:</p>
+        <a href="${resetUrl}" style="background: #22c55e; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Reset Password</a>
+        <p>If you did not request this, please ignore this email.</p>
+        <p>This link will expire in 10 minutes.</p>
+      `
+    );
+
+    res.status(200).json({
+      success: true,
+      data: 'Email sent'
+    });
+  } catch (err) {
+    console.log(err);
+    user.resetPasswordToken = undefined;
+    user.resetPasswordExpire = undefined;
+
+    await user.save({ validateBeforeSave: false });
+
+    return next(new ErrorResponse('Email could not be sent', 500));
+  }
+});
+
+// @desc    Reset password
+// @route   PUT /api/auth/resetpassword/:resettoken
+// @access  Public
+export const resetPassword = asyncHandler(async (req, res, next) => {
+  // Get hashed token
+  const resetPasswordToken = crypto
+    .createHash('sha256')
+    .update(req.params.resettoken)
+    .digest('hex');
+
+  const user = await User.findOne({
+    resetPasswordToken,
+    resetPasswordExpire: { $gt: Date.now() }
+  });
+
+  if (!user) {
+    return next(new ErrorResponse('Invalid token', 400));
+  }
+
+  // Set new password
+  user.password = req.body.password;
+  user.resetPasswordToken = undefined;
+  user.resetPasswordExpire = undefined;
   await user.save();
 
   sendTokenResponse(user, 200, res);

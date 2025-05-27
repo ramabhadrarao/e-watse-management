@@ -1,4 +1,17 @@
+// server/routes/users.js - Enhanced
 import express from 'express';
+import {
+  getUsers,
+  getUser,
+  createUser,
+  updateUser,
+  deleteUser,
+  updateUserStatus,
+  getUserStats,
+  getPickupBoys,
+  resetUserPassword,
+  notifyUser
+} from '../controllers/users.js';
 import { protect, authorize } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -6,12 +19,30 @@ const router = express.Router();
 // Protect all routes after this middleware
 router.use(protect);
 
-// Only admin can access these routes
+// Admin/Manager routes
 router.use(authorize('admin', 'manager'));
 
-// Route handlers will be implemented here
-router.get('/', (req, res) => {
-  res.status(200).json({ success: true, message: 'Users route' });
-});
+// Get user statistics
+router.get('/stats', getUserStats);
+
+// Get pickup boys for assignment
+router.get('/pickup-boys', getPickupBoys);
+
+// Main user routes
+router.route('/')
+  .get(getUsers)
+  .post(authorize('admin'), createUser);
+
+router.route('/:id')
+  .get(getUser)
+  .put(updateUser)
+  .delete(authorize('admin'), deleteUser);
+
+// User status management
+router.put('/:id/status', updateUserStatus);
+
+// Admin only routes
+router.put('/:id/reset-password', authorize('admin'), resetUserPassword);
+router.post('/:id/notify', notifyUser);
 
 export default router;

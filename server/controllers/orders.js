@@ -1,8 +1,15 @@
+// server/controllers/orders.js
+// Enhanced orders controller with email notifications and receipt generation
+
 import Order from '../models/Order.js';
 import Category from '../models/Category.js';
 import User from '../models/User.js';
 import { asyncHandler } from '../middleware/async.js';
 import { ErrorResponse } from '../utils/errorResponse.js';
+import { emailService } from '../services/emailService.js';
+import PDFDocument from 'pdfkit';
+import fs from 'fs';
+import path from 'path';
 
 // @desc    Create new order
 // @route   POST /api/orders
@@ -83,6 +90,15 @@ export const createOrder = asyncHandler(async (req, res, next) => {
     const populatedOrder = await Order.findById(order._id)
       .populate('items.categoryId', 'name icon')
       .populate('customerId', 'firstName lastName email phone');
+
+    // Send confirmation email
+    try {
+      await emailService.sendOrderConfirmation(populatedOrder, populatedOrder.customerId);
+      console.log('Order confirmation email sent successfully');
+    } catch (emailError) {
+      console.error('Failed to send order confirmation email:', emailError);
+      // Don't fail the order creation if email fails
+    }
 
     res.status(201).json({
       success: true,
@@ -177,15 +193,27 @@ export const cancelOrder = asyncHandler(async (req, res, next) => {
 // @route   GET /api/orders/all
 // @access  Private/Admin/Manager
 export const getAllOrders = asyncHandler(async (req, res, next) => {
-  const { status, page = 1, limit = 10 } = req.query;
+  const { status, page = 1, limit = 10, search } = req.query;
   
   let query = Order.find()
     .populate('items.categoryId', 'name icon')
     .populate('assignedPickupBoy', 'firstName lastName phone')
     .populate('customerId', 'firstName lastName email phone');
 
-  if (status) {
+  if (status && status !== 'all') {
     query = query.where({ status });
+  }
+
+  // Search functionality
+  if (search) {
+    query = query.where({
+      $or: [
+        { orderNumber: new RegExp(search, 'i') },
+        { 'customerId.firstName': new RegExp(search, 'i') },
+        { 'customerId.lastName': new RegExp(search, 'i') },
+        { 'customerId.email': new RegExp(search, 'i') }
+      ]
+    });
   }
 
   // Pagination
@@ -209,6 +237,7 @@ export const getAllOrders = asyncHandler(async (req, res, next) => {
   res.status(200).json({
     success: true,
     count: orders.length,
+    total,
     pagination,
     data: orders
   });
@@ -218,9 +247,11 @@ export const getAllOrders = asyncHandler(async (req, res, next) => {
 // @route   PUT /api/orders/:id/status
 // @access  Private/Admin/Manager/PickupBoy
 export const updateOrderStatus = asyncHandler(async (req, res, next) => {
-  const { status, note } = req.body;
+  const { status, note, actualTotal } = req.body;
   
-  let order = await Order.findById(req.params.id);
+  let order = await Order.findById(req.params.id)
+    .populate('customerId', 'firstName lastName email')
+    .populate('assignedPickupBoy', 'firstName lastName phone');
 
   if (!order) {
     return next(new ErrorResponse(`Order not found with id of ${req.params.id}`, 404));
@@ -228,11 +259,19 @@ export const updateOrderStatus = asyncHandler(async (req, res, next) => {
 
   // If pickup boy, can only update orders assigned to them
   if (req.user.role === 'pickup_boy' && 
-      (!order.assignedPickupBoy || order.assignedPickupBoy.toString() !== req.user.id)) {
+      (!order.assignedPickupBoy || order.assignedPickupBoy._id.toString() !== req.user.id)) {
     return next(new ErrorResponse('Not authorized to update this order', 401));
   }
 
+  const oldStatus = order.status;
   order.status = status;
+
+  // Update actual total if provided (for completed orders)
+  if (actualTotal && status === 'completed') {
+    order.pricing.actualTotal = actualTotal;
+    order.pricing.finalAmount = actualTotal + order.pricing.pickupCharges;
+  }
+
   order.timeline.push({
     status,
     timestamp: new Date(),
@@ -241,6 +280,15 @@ export const updateOrderStatus = asyncHandler(async (req, res, next) => {
   });
 
   await order.save();
+
+  // Send email notifications for status changes
+  try {
+    if (status === 'completed' && oldStatus !== 'completed') {
+      await emailService.sendOrderCompleted(order, order.customerId);
+    }
+  } catch (emailError) {
+    console.error('Failed to send status update email:', emailError);
+  }
 
   res.status(200).json({
     success: true,
@@ -254,7 +302,8 @@ export const updateOrderStatus = asyncHandler(async (req, res, next) => {
 export const assignPickupBoy = asyncHandler(async (req, res, next) => {
   const { pickupBoyId } = req.body;
   
-  let order = await Order.findById(req.params.id);
+  let order = await Order.findById(req.params.id)
+    .populate('customerId', 'firstName lastName email');
 
   if (!order) {
     return next(new ErrorResponse(`Order not found with id of ${req.params.id}`, 404));
@@ -277,9 +326,21 @@ export const assignPickupBoy = asyncHandler(async (req, res, next) => {
 
   await order.save();
 
+  // Populate for email
+  const populatedOrder = await Order.findById(order._id)
+    .populate('customerId', 'firstName lastName email')
+    .populate('assignedPickupBoy', 'firstName lastName phone');
+
+  // Send email notification
+  try {
+    await emailService.sendPickupAssigned(populatedOrder, populatedOrder.customerId, populatedOrder.assignedPickupBoy);
+  } catch (emailError) {
+    console.error('Failed to send pickup assignment email:', emailError);
+  }
+
   res.status(200).json({
     success: true,
-    data: order
+    data: populatedOrder
   });
 });
 
@@ -340,4 +401,179 @@ export const verifyPickupPin = asyncHandler(async (req, res, next) => {
     success: true,
     data: order
   });
+});
+
+// @desc    Generate order receipt PDF
+// @route   GET /api/orders/:id/receipt
+// @access  Private
+export const generateOrderReceipt = asyncHandler(async (req, res, next) => {
+  const order = await Order.findById(req.params.id)
+    .populate('items.categoryId', 'name')
+    .populate('customerId', 'firstName lastName email phone address')
+    .populate('assignedPickupBoy', 'firstName lastName phone');
+
+  if (!order) {
+    return next(new ErrorResponse(`Order not found with id of ${req.params.id}`, 404));
+  }
+
+  // Check permissions
+  if (order.customerId._id.toString() !== req.user.id && !['admin', 'manager'].includes(req.user.role)) {
+    return next(new ErrorResponse('Not authorized to access this receipt', 401));
+  }
+
+  // Only generate receipt for completed orders
+  if (order.status !== 'completed') {
+    return next(new ErrorResponse('Receipt can only be generated for completed orders', 400));
+  }
+
+  try {
+    // Create PDF document
+    const doc = new PDFDocument({ margin: 50 });
+    
+    // Set response headers
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="receipt-${order.orderNumber}.pdf"`);
+    
+    // Pipe PDF to response
+    doc.pipe(res);
+
+    // Company header
+    doc.fontSize(20).fillColor('#22c55e').text('E-Waste Management Platform', 50, 50);
+    doc.fontSize(12).fillColor('black').text('Sustainable E-Waste Recycling', 50, 75);
+    doc.text('Phone: +91-98765-43210 | Email: contact@ewaste.org', 50, 90);
+    
+    // Draw line
+    doc.moveTo(50, 110).lineTo(550, 110).stroke();
+
+    // Receipt title
+    doc.fontSize(16).fillColor('#1f2937').text('PICKUP RECEIPT', 50, 130);
+    
+    // Order details section
+    let yPosition = 160;
+    doc.fontSize(12).fillColor('black');
+    
+    const leftColumn = 50;
+    const rightColumn = 300;
+    
+    doc.text('Order Number:', leftColumn, yPosition).text(order.orderNumber, rightColumn, yPosition);
+    yPosition += 20;
+    doc.text('Order Date:', leftColumn, yPosition).text(new Date(order.createdAt).toLocaleDateString(), rightColumn, yPosition);
+    yPosition += 20;
+    doc.text('Completion Date:', leftColumn, yPosition).text(new Date(order.updatedAt).toLocaleDateString(), rightColumn, yPosition);
+    yPosition += 20;
+    doc.text('Status:', leftColumn, yPosition).text(order.status.toUpperCase(), rightColumn, yPosition);
+    
+    yPosition += 40;
+    
+    // Customer details
+    doc.fontSize(14).fillColor('#1f2937').text('Customer Details:', leftColumn, yPosition);
+    yPosition += 25;
+    doc.fontSize(12).fillColor('black');
+    
+    const customer = order.customerId;
+    doc.text('Name:', leftColumn, yPosition).text(`${customer.firstName} ${customer.lastName}`, rightColumn, yPosition);
+    yPosition += 20;
+    doc.text('Email:', leftColumn, yPosition).text(customer.email, rightColumn, yPosition);
+    yPosition += 20;
+    doc.text('Phone:', leftColumn, yPosition).text(customer.phone || 'N/A', rightColumn, yPosition);
+    
+    yPosition += 40;
+    
+    // Pickup details
+    doc.fontSize(14).fillColor('#1f2937').text('Pickup Details:', leftColumn, yPosition);
+    yPosition += 25;
+    doc.fontSize(12).fillColor('black');
+    
+    const address = order.pickupDetails.address;
+    doc.text('Address:', leftColumn, yPosition);
+    doc.text(`${address.street}, ${address.city}`, rightColumn, yPosition);
+    yPosition += 15;
+    doc.text(`${address.state} - ${address.pincode}`, rightColumn, yPosition);
+    yPosition += 25;
+    
+    if (order.assignedPickupBoy) {
+      doc.text('Pickup Executive:', leftColumn, yPosition)
+         .text(`${order.assignedPickupBoy.firstName} ${order.assignedPickupBoy.lastName}`, rightColumn, yPosition);
+      yPosition += 20;
+    }
+    
+    yPosition += 30;
+    
+    // Items table
+    doc.fontSize(14).fillColor('#1f2937').text('Items Collected:', leftColumn, yPosition);
+    yPosition += 30;
+    
+    // Table headers
+    doc.fontSize(10).fillColor('#6b7280');
+    doc.text('Item', leftColumn, yPosition);
+    doc.text('Condition', leftColumn + 150, yPosition);
+    doc.text('Qty', leftColumn + 220, yPosition);
+    doc.text('Amount', leftColumn + 280, yPosition);
+    yPosition += 20;
+    
+    // Draw line under headers
+    doc.moveTo(leftColumn, yPosition - 5).lineTo(leftColumn + 330, yPosition - 5).stroke();
+    
+    // Table rows
+    doc.fontSize(10).fillColor('black');
+    order.items.forEach((item) => {
+      const itemName = `${item.brand ? item.brand + ' ' : ''}${item.model ? item.model + ' ' : ''}(${item.categoryId.name})`;
+      doc.text(itemName.substring(0, 25), leftColumn, yPosition);
+      doc.text(item.condition, leftColumn + 150, yPosition);
+      doc.text(item.quantity.toString(), leftColumn + 220, yPosition);
+      doc.text(`₹${(item.finalPrice || item.estimatedPrice).toLocaleString()}`, leftColumn + 280, yPosition);
+      yPosition += 18;
+    });
+    
+    // Draw line before totals
+    yPosition += 10;
+    doc.moveTo(leftColumn, yPosition).lineTo(leftColumn + 330, yPosition).stroke();
+    yPosition += 20;
+    
+    // Totals
+    doc.fontSize(12);
+    doc.text('Estimated Total:', leftColumn + 180, yPosition).text(`₹${order.pricing.estimatedTotal.toLocaleString()}`, leftColumn + 280, yPosition);
+    yPosition += 20;
+    
+    if (order.pricing.pickupCharges > 0) {
+      doc.text('Pickup Charges:', leftColumn + 180, yPosition).text(`₹${order.pricing.pickupCharges.toLocaleString()}`, leftColumn + 280, yPosition);
+      yPosition += 20;
+    }
+    
+    doc.fontSize(14).fillColor('#22c55e');
+    doc.text('Final Amount:', leftColumn + 180, yPosition)
+       .text(`₹${(order.pricing.actualTotal || order.pricing.finalAmount).toLocaleString()}`, leftColumn + 280, yPosition);
+    
+    yPosition += 50;
+    
+    // Footer
+    doc.fontSize(10).fillColor('#6b7280');
+    doc.text('Thank you for contributing to environmental sustainability!', leftColumn, yPosition);
+    yPosition += 15;
+    doc.text('This is a computer-generated receipt and does not require a signature.', leftColumn, yPosition);
+    
+    // Environmental impact note
+    yPosition += 30;
+    doc.fontSize(12).fillColor('#22c55e');
+    doc.text('🌱 Environmental Impact:', leftColumn, yPosition);
+    yPosition += 20;
+    doc.fontSize(10).fillColor('black');
+    
+    const totalItems = order.items.reduce((sum, item) => sum + item.quantity, 0);
+    const estimatedCO2Saved = Math.round(totalItems * 0.4);
+    const estimatedEnergySaved = Math.round(totalItems * 1.4);
+    
+    doc.text(`• Items recycled: ${totalItems}`, leftColumn, yPosition);
+    yPosition += 15;
+    doc.text(`• Estimated CO₂ emissions prevented: ${estimatedCO2Saved} kg`, leftColumn, yPosition);
+    yPosition += 15;
+    doc.text(`• Estimated energy saved: ${estimatedEnergySaved} kWh`, leftColumn, yPosition);
+    
+    // Finalize PDF
+    doc.end();
+    
+  } catch (error) {
+    console.error('PDF generation error:', error);
+    return next(new ErrorResponse('Failed to generate receipt', 500));
+  }
 });
