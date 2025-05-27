@@ -1,3 +1,6 @@
+// server/middleware/auth.js
+// FIXED: Enhanced auth middleware with better error handling and logging
+
 import jwt from 'jsonwebtoken';
 import { asyncHandler } from './async.js';
 import { ErrorResponse } from '../utils/errorResponse.js';
@@ -21,6 +24,7 @@ export const protect = asyncHandler(async (req, res, next) => {
 
   // Make sure token exists
   if (!token) {
+    console.log(`❌ Auth failed for ${req.method} ${req.originalUrl}: No token provided`);
     return next(new ErrorResponse('Not authorized to access this route', 401));
   }
 
@@ -31,13 +35,21 @@ export const protect = asyncHandler(async (req, res, next) => {
     // Set user to req.user
     req.user = await User.findById(decoded.id);
 
+    if (!req.user) {
+      console.log(`❌ Auth failed for ${req.method} ${req.originalUrl}: User not found for token`);
+      return next(new ErrorResponse('Not authorized to access this route', 401));
+    }
+
     // Check if user is active
     if (!req.user.isActive) {
+      console.log(`❌ Auth failed for ${req.method} ${req.originalUrl}: User account deactivated (${req.user.email})`);
       return next(new ErrorResponse('User account is deactivated', 401));
     }
 
+    console.log(`✅ Auth success for ${req.method} ${req.originalUrl}: ${req.user.email} (${req.user.role})`);
     next();
   } catch (err) {
+    console.log(`❌ Auth failed for ${req.method} ${req.originalUrl}: Invalid token - ${err.message}`);
     return next(new ErrorResponse('Not authorized to access this route', 401));
   }
 });
@@ -46,6 +58,7 @@ export const protect = asyncHandler(async (req, res, next) => {
 export const authorize = (...roles) => {
   return (req, res, next) => {
     if (!roles.includes(req.user.role)) {
+      console.log(`❌ Authorization failed for ${req.method} ${req.originalUrl}: Role ${req.user.role} not in allowed roles: [${roles.join(', ')}]`);
       return next(
         new ErrorResponse(
           `User role ${req.user.role} is not authorized to access this route`,
@@ -53,6 +66,7 @@ export const authorize = (...roles) => {
         )
       );
     }
+    console.log(`✅ Authorization success for ${req.method} ${req.originalUrl}: Role ${req.user.role} authorized`);
     next();
   };
 };

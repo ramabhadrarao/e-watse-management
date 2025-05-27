@@ -1,5 +1,5 @@
 // server/controllers/orders.js
-// Enhanced orders controller with email notifications and receipt generation
+// UPDATED: Enhanced orders controller with improved assignment functionality and email integration
 
 import Order from '../models/Order.js';
 import Category from '../models/Category.js';
@@ -10,6 +10,7 @@ import { emailService } from '../services/emailService.js';
 import PDFDocument from 'pdfkit';
 import fs from 'fs';
 import path from 'path';
+import mongoose from 'mongoose';
 
 // @desc    Create new order
 // @route   POST /api/orders
@@ -131,6 +132,11 @@ export const getUserOrders = asyncHandler(async (req, res, next) => {
 // @route   GET /api/orders/:id
 // @access  Private
 export const getOrder = asyncHandler(async (req, res, next) => {
+  // FIXED: Check if id is valid ObjectId before querying
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid order ID format`, 400));
+  }
+
   let query = Order.findById(req.params.id)
     .populate('items.categoryId', 'name icon')
     .populate('assignedPickupBoy', 'firstName lastName phone')
@@ -157,6 +163,11 @@ export const getOrder = asyncHandler(async (req, res, next) => {
 // @route   PUT /api/orders/:id/cancel
 // @access  Private
 export const cancelOrder = asyncHandler(async (req, res, next) => {
+  // FIXED: Check if id is valid ObjectId
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid order ID format`, 400));
+  }
+
   let order = await Order.findById(req.params.id);
 
   if (!order) {
@@ -193,7 +204,7 @@ export const cancelOrder = asyncHandler(async (req, res, next) => {
 // @route   GET /api/orders/all
 // @access  Private/Admin/Manager
 export const getAllOrders = asyncHandler(async (req, res, next) => {
-  const { status, page = 1, limit = 10, search } = req.query;
+  const { status, page = 1, limit = 10, search, assigned } = req.query;
   
   let query = Order.find()
     .populate('items.categoryId', 'name icon')
@@ -202,6 +213,13 @@ export const getAllOrders = asyncHandler(async (req, res, next) => {
 
   if (status && status !== 'all') {
     query = query.where({ status });
+  }
+
+  // Filter by assignment status
+  if (assigned === 'true') {
+    query = query.where({ assignedPickupBoy: { $ne: null } });
+  } else if (assigned === 'false') {
+    query = query.where({ assignedPickupBoy: null });
   }
 
   // Search functionality
@@ -243,15 +261,111 @@ export const getAllOrders = asyncHandler(async (req, res, next) => {
   });
 });
 
+// @desc    Get orders pending assignment (Admin/Manager)
+// @route   GET /api/orders/pending-assignment
+// @access  Private/Admin/Manager
+export const getOrdersPendingAssignment = asyncHandler(async (req, res, next) => {
+  const { city, pincode, timeSlot, date } = req.query;
+
+  let query = Order.find({ 
+    assignedPickupBoy: null,
+    status: { $in: ['pending', 'confirmed'] }
+  })
+    .populate('items.categoryId', 'name icon')
+    .populate('customerId', 'firstName lastName email phone');
+
+  // Filter by location
+  if (city) {
+    query = query.where({ 'pickupDetails.address.city': new RegExp(city, 'i') });
+  }
+  if (pincode) {
+    query = query.where({ 'pickupDetails.address.pincode': pincode });
+  }
+  if (timeSlot) {
+    query = query.where({ 'pickupDetails.timeSlot': timeSlot });
+  }
+  if (date) {
+    const startDate = new Date(date);
+    startDate.setHours(0, 0, 0, 0);
+    const endDate = new Date(date);
+    endDate.setHours(23, 59, 59, 999);
+    query = query.where({ 
+      'pickupDetails.preferredDate': { 
+        $gte: startDate, 
+        $lte: endDate 
+      } 
+    });
+  }
+
+  const orders = await query.sort({ createdAt: 1 }); // Oldest first for assignment priority
+
+  res.status(200).json({
+    success: true,
+    count: orders.length,
+    data: orders
+  });
+});
+
+// @desc    Get order statistics
+// @route   GET /api/orders/statistics
+// @access  Private/Admin/Manager  
+export const getOrderStatistics = asyncHandler(async (req, res, next) => {
+  const stats = await Promise.all([
+    Order.countDocuments({ status: 'pending' }),
+    Order.countDocuments({ status: 'confirmed' }),
+    Order.countDocuments({ status: 'assigned' }),
+    Order.countDocuments({ status: 'in_transit' }),
+    Order.countDocuments({ status: 'picked_up' }),
+    Order.countDocuments({ status: 'processing' }),
+    Order.countDocuments({ status: 'completed' }),
+    Order.countDocuments({ status: 'cancelled' }),
+    Order.countDocuments({ assignedPickupBoy: null, status: { $in: ['pending', 'confirmed'] } }),
+    Order.countDocuments({
+      createdAt: {
+        $gte: new Date(new Date().setDate(new Date().getDate() - 7))
+      }
+    }),
+    Order.aggregate([
+      { $match: { status: 'completed' } },
+      { $group: { _id: null, total: { $sum: '$pricing.actualTotal' } } }
+    ])
+  ]);
+
+  const [pending, confirmed, assigned, inTransit, pickedUp, processing, completed, cancelled, unassigned, thisWeek, revenueData] = stats;
+
+  res.status(200).json({
+    success: true,
+    data: {
+      total: pending + confirmed + assigned + inTransit + pickedUp + processing + completed + cancelled,
+      pending,
+      confirmed,
+      assigned,
+      inTransit,
+      pickedUp,
+      processing,
+      completed,
+      cancelled,
+      unassigned,
+      thisWeek,
+      totalRevenue: revenueData[0]?.total || 0
+    }
+  });
+});
+
 // @desc    Update order status
 // @route   PUT /api/orders/:id/status
 // @access  Private/Admin/Manager/PickupBoy
 export const updateOrderStatus = asyncHandler(async (req, res, next) => {
   const { status, note, actualTotal } = req.body;
   
+  // FIXED: Check if id is valid ObjectId
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid order ID format`, 400));
+  }
+
   let order = await Order.findById(req.params.id)
     .populate('customerId', 'firstName lastName email')
-    .populate('assignedPickupBoy', 'firstName lastName phone');
+    .populate('assignedPickupBoy', 'firstName lastName phone email');
 
   if (!order) {
     return next(new ErrorResponse(`Order not found with id of ${req.params.id}`, 404));
@@ -286,6 +400,16 @@ export const updateOrderStatus = asyncHandler(async (req, res, next) => {
     if (status === 'completed' && oldStatus !== 'completed') {
       await emailService.sendOrderCompleted(order, order.customerId);
     }
+    
+    // Notify pickup boy of status changes (if applicable)
+    if (order.assignedPickupBoy && req.user.role !== 'pickup_boy') {
+      await emailService.sendAssignmentStatusUpdate(
+        order.assignedPickupBoy, 
+        order, 
+        oldStatus, 
+        status
+      );
+    }
   } catch (emailError) {
     console.error('Failed to send status update email:', emailError);
   }
@@ -302,6 +426,11 @@ export const updateOrderStatus = asyncHandler(async (req, res, next) => {
 export const assignPickupBoy = asyncHandler(async (req, res, next) => {
   const { pickupBoyId } = req.body;
   
+  // FIXED: Check if id is valid ObjectId
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid order ID format`, 400));
+  }
+
   let order = await Order.findById(req.params.id)
     .populate('customerId', 'firstName lastName email');
 
@@ -309,10 +438,25 @@ export const assignPickupBoy = asyncHandler(async (req, res, next) => {
     return next(new ErrorResponse(`Order not found with id of ${req.params.id}`, 404));
   }
 
-  // Verify pickup boy exists
-  const pickupBoy = await User.findOne({ _id: pickupBoyId, role: 'pickup_boy' });
+  // Verify pickup boy exists and is active
+  const pickupBoy = await User.findOne({ 
+    _id: pickupBoyId, 
+    role: 'pickup_boy',
+    isActive: true 
+  });
+  
   if (!pickupBoy) {
-    return next(new ErrorResponse('Pickup boy not found', 404));
+    return next(new ErrorResponse('Pickup boy not found or inactive', 404));
+  }
+
+  // Check pickup boy workload
+  const currentWorkload = await Order.countDocuments({
+    assignedPickupBoy: pickupBoyId,
+    status: { $in: ['assigned', 'in_transit', 'picked_up'] }
+  });
+
+  if (currentWorkload >= 8) {
+    return next(new ErrorResponse('Pickup boy is at maximum capacity (8 active orders)', 400));
   }
 
   order.assignedPickupBoy = pickupBoyId;
@@ -329,18 +473,217 @@ export const assignPickupBoy = asyncHandler(async (req, res, next) => {
   // Populate for email
   const populatedOrder = await Order.findById(order._id)
     .populate('customerId', 'firstName lastName email')
-    .populate('assignedPickupBoy', 'firstName lastName phone');
+    .populate('assignedPickupBoy', 'firstName lastName phone email')
+    .populate('items.categoryId', 'name');
 
-  // Send email notification
+  // Send email notifications
   try {
-    await emailService.sendPickupAssigned(populatedOrder, populatedOrder.customerId, populatedOrder.assignedPickupBoy);
+    // Notify customer
+    await emailService.sendPickupAssigned(
+      populatedOrder, 
+      populatedOrder.customerId, 
+      populatedOrder.assignedPickupBoy
+    );
+    
+    // Notify pickup boy
+    await emailService.sendPickupBoyAssignmentNotification(
+      populatedOrder.assignedPickupBoy, 
+      populatedOrder
+    );
+    
+    console.log('Assignment emails sent successfully');
   } catch (emailError) {
-    console.error('Failed to send pickup assignment email:', emailError);
+    console.error('Failed to send assignment emails:', emailError);
   }
 
   res.status(200).json({
     success: true,
     data: populatedOrder
+  });
+});
+
+// @desc    Bulk assign orders to pickup boys
+// @route   POST /api/orders/bulk-assign
+// @access  Private/Admin/Manager
+export const bulkAssignOrders = asyncHandler(async (req, res, next) => {
+  const { assignments } = req.body; // Array of { orderId, pickupBoyId }
+
+  if (!assignments || !Array.isArray(assignments)) {
+    return next(new ErrorResponse('Assignments array is required', 400));
+  }
+
+  const results = [];
+  const errors = [];
+
+  for (const assignment of assignments) {
+    try {
+      const { orderId, pickupBoyId } = assignment;
+
+      // Validate ObjectIds
+      if (!mongoose.Types.ObjectId.isValid(orderId) || !mongoose.Types.ObjectId.isValid(pickupBoyId)) {
+        errors.push({ orderId, error: 'Invalid ID format' });
+        continue;
+      }
+
+      const order = await Order.findById(orderId);
+      const pickupBoy = await User.findOne({ _id: pickupBoyId, role: 'pickup_boy', isActive: true });
+
+      if (!order) {
+        errors.push({ orderId, error: 'Order not found' });
+        continue;
+      }
+
+      if (!pickupBoy) {
+        errors.push({ orderId, error: 'Pickup boy not found or inactive' });
+        continue;
+      }
+
+      // Check if already assigned
+      if (order.assignedPickupBoy) {
+        errors.push({ orderId, error: 'Order already assigned' });
+        continue;
+      }
+
+      // Assign order
+      order.assignedPickupBoy = pickupBoyId;
+      order.status = 'assigned';
+      order.timeline.push({
+        status: 'assigned',
+        timestamp: new Date(),
+        updatedBy: req.user.id,
+        note: `Bulk assigned to ${pickupBoy.firstName} ${pickupBoy.lastName}`
+      });
+
+      await order.save();
+      results.push({ orderId, status: 'success', assignedTo: pickupBoy.firstName + ' ' + pickupBoy.lastName });
+
+    } catch (error) {
+      errors.push({ orderId: assignment.orderId, error: error.message });
+    }
+  }
+
+  res.status(200).json({
+    success: true,
+    data: {
+      successful: results.length,
+      failed: errors.length,
+      results,
+      errors
+    }
+  });
+});
+
+// @desc    Auto-assign orders based on location and workload
+// @route   POST /api/orders/auto-assign
+// @access  Private/Admin/Manager
+export const autoAssignOrders = asyncHandler(async (req, res, next) => {
+  const { city, pincode, maxAssignments = 5 } = req.body;
+
+  // Get unassigned orders
+  let orderQuery = Order.find({ 
+    assignedPickupBoy: null,
+    status: { $in: ['pending', 'confirmed'] }
+  }).populate('customerId', 'firstName lastName');
+
+  if (city) {
+    orderQuery = orderQuery.where({ 'pickupDetails.address.city': new RegExp(city, 'i') });
+  }
+  if (pincode) {
+    orderQuery = orderQuery.where({ 'pickupDetails.address.pincode': pincode });
+  }
+
+  const orders = await orderQuery.limit(maxAssignments).sort({ createdAt: 1 });
+
+  if (orders.length === 0) {
+    return res.status(200).json({
+      success: true,
+      message: 'No unassigned orders found',
+      data: { assigned: 0, orders: [] }
+    });
+  }
+
+  // Get available pickup boys in the area
+  let pickupBoyQuery = User.find({ 
+    role: 'pickup_boy', 
+    isActive: true 
+  });
+
+  if (city) {
+    pickupBoyQuery = pickupBoyQuery.where({ 'address.city': new RegExp(city, 'i') });
+  }
+  if (pincode) {
+    pickupBoyQuery = pickupBoyQuery.where({ 'address.pincode': pincode });
+  }
+
+  const pickupBoys = await pickupBoyQuery;
+
+  if (pickupBoys.length === 0) {
+    return next(new ErrorResponse('No pickup boys available in the specified area', 404));
+  }
+
+  // Get workload for each pickup boy
+  const pickupBoysWithWorkload = await Promise.all(
+    pickupBoys.map(async (pb) => {
+      const activeOrders = await Order.countDocuments({
+        assignedPickupBoy: pb._id,
+        status: { $in: ['assigned', 'in_transit', 'picked_up'] }
+      });
+      return { ...pb.toObject(), activeOrders };
+    })
+  );
+
+  // Sort by workload (least busy first)
+  pickupBoysWithWorkload.sort((a, b) => a.activeOrders - b.activeOrders);
+
+  const assignments = [];
+  let pickupBoyIndex = 0;
+
+  for (const order of orders) {
+    // Find pickup boy with capacity
+    while (pickupBoyIndex < pickupBoysWithWorkload.length && 
+           pickupBoysWithWorkload[pickupBoyIndex].activeOrders >= 8) {
+      pickupBoyIndex++;
+    }
+
+    if (pickupBoyIndex >= pickupBoysWithWorkload.length) {
+      break; // No more available pickup boys
+    }
+
+    const selectedPickupBoy = pickupBoysWithWorkload[pickupBoyIndex];
+
+    // Assign order
+    order.assignedPickupBoy = selectedPickupBoy._id;
+    order.status = 'assigned';
+    order.timeline.push({
+      status: 'assigned',
+      timestamp: new Date(),
+      updatedBy: req.user.id,
+      note: `Auto-assigned to ${selectedPickupBoy.firstName} ${selectedPickupBoy.lastName}`
+    });
+
+    await order.save();
+
+    assignments.push({
+      orderId: order._id,
+      orderNumber: order.orderNumber,
+      pickupBoyId: selectedPickupBoy._id,
+      pickupBoyName: `${selectedPickupBoy.firstName} ${selectedPickupBoy.lastName}`
+    });
+
+    // Increment workload for next assignment
+    selectedPickupBoy.activeOrders++;
+
+    // Move to next pickup boy for load balancing
+    pickupBoyIndex = (pickupBoyIndex + 1) % pickupBoysWithWorkload.length;
+  }
+
+  res.status(200).json({
+    success: true,
+    message: `Auto-assigned ${assignments.length} orders`,
+    data: {
+      assigned: assignments.length,
+      assignments
+    }
   });
 });
 
@@ -369,6 +712,11 @@ export const getAssignedOrders = asyncHandler(async (req, res, next) => {
 export const verifyPickupPin = asyncHandler(async (req, res, next) => {
   const { pin } = req.body;
   
+  // FIXED: Check if id is valid ObjectId
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid order ID format`, 400));
+  }
+
   let order = await Order.findById(req.params.id);
 
   if (!order) {
@@ -407,6 +755,11 @@ export const verifyPickupPin = asyncHandler(async (req, res, next) => {
 // @route   GET /api/orders/:id/receipt
 // @access  Private
 export const generateOrderReceipt = asyncHandler(async (req, res, next) => {
+  // FIXED: Check if id is valid ObjectId
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid order ID format`, 400));
+  }
+
   const order = await Order.findById(req.params.id)
     .populate('items.categoryId', 'name')
     .populate('customerId', 'firstName lastName email phone address')

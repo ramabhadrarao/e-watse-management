@@ -1,7 +1,8 @@
 // server/controllers/users.js
-// User management controller for admin operations
+// UPDATED: Enhanced user management controller with pickup boy availability and assignment features
 
 import User from '../models/User.js';
+import Order from '../models/Order.js';
 import { asyncHandler } from '../middleware/async.js';
 import { ErrorResponse } from '../utils/errorResponse.js';
 import { emailService } from '../services/emailService.js';
@@ -219,15 +220,20 @@ export const getUserStats = asyncHandler(async (req, res, next) => {
 // @route   GET /api/users/pickup-boys
 // @access  Private/Admin/Manager
 export const getPickupBoys = asyncHandler(async (req, res, next) => {
-  const { pincode } = req.query;
+  const { pincode, city } = req.query;
 
   let query = User.find({ 
     role: 'pickup_boy', 
     isActive: true 
   });
 
-  // If pincode is provided, we might want to filter by location
-  // This would require additional logic based on your pincode assignment system
+  // Filter by location if provided
+  if (pincode) {
+    query = query.where({ 'address.pincode': pincode });
+  }
+  if (city) {
+    query = query.where({ 'address.city': new RegExp(city, 'i') });
+  }
 
   const pickupBoys = await query.select('firstName lastName phone email address');
 
@@ -235,6 +241,176 @@ export const getPickupBoys = asyncHandler(async (req, res, next) => {
     success: true,
     count: pickupBoys.length,
     data: pickupBoys
+  });
+});
+
+// @desc    Get pickup boys with workload and availability info
+// @route   GET /api/users/pickup-boys/availability
+// @access  Private/Admin/Manager
+export const getPickupBoyAvailability = asyncHandler(async (req, res, next) => {
+  const { pincode, city, date } = req.query;
+
+  let query = User.find({ 
+    role: 'pickup_boy', 
+    isActive: true 
+  });
+
+  // Filter by location if provided
+  if (pincode) {
+    query = query.where({ 'address.pincode': pincode });
+  }
+  if (city) {
+    query = query.where({ 'address.city': new RegExp(city, 'i') });
+  }
+
+  const pickupBoys = await query.select('firstName lastName phone email address');
+
+  // Get current workload for each pickup boy
+  const pickupBoysWithWorkload = await Promise.all(
+    pickupBoys.map(async (pickupBoy) => {
+      // Count active orders (assigned, in_transit, picked_up)
+      const activeOrders = await Order.countDocuments({
+        assignedPickupBoy: pickupBoy._id,
+        status: { $in: ['assigned', 'in_transit', 'picked_up'] }
+      });
+
+      // Count today's orders
+      const startOfDay = new Date();
+      startOfDay.setHours(0, 0, 0, 0);
+      const endOfDay = new Date();
+      endOfDay.setHours(23, 59, 59, 999);
+
+      const todayOrders = await Order.countDocuments({
+        assignedPickupBoy: pickupBoy._id,
+        'pickupDetails.preferredDate': {
+          $gte: startOfDay,
+          $lte: endOfDay
+        }
+      });
+
+      // Count completed orders this week
+      const startOfWeek = new Date();
+      startOfWeek.setDate(startOfWeek.getDate() - startOfWeek.getDay());
+      startOfWeek.setHours(0, 0, 0, 0);
+
+      const weekCompletedOrders = await Order.countDocuments({
+        assignedPickupBoy: pickupBoy._id,
+        status: 'completed',
+        updatedAt: { $gte: startOfWeek }
+      });
+
+      // Calculate availability status
+      let availabilityStatus = 'available';
+      if (activeOrders >= 8) {
+        availabilityStatus = 'overloaded';
+      } else if (activeOrders >= 5) {
+        availabilityStatus = 'busy';
+      } else if (activeOrders >= 3) {
+        availabilityStatus = 'moderate';
+      }
+
+      return {
+        ...pickupBoy.toObject(),
+        workload: {
+          activeOrders,
+          todayOrders,
+          weekCompletedOrders,
+          maxCapacity: 8,
+          availabilityStatus,
+          canTakeNewOrder: activeOrders < 8
+        },
+        performance: {
+          weeklyCompletions: weekCompletedOrders,
+          efficiency: weekCompletedOrders > 0 ? 'high' : 'normal'
+        }
+      };
+    })
+  );
+
+  // Sort by availability (available first, then by workload)
+  pickupBoysWithWorkload.sort((a, b) => {
+    if (a.workload.availabilityStatus === 'available' && b.workload.availabilityStatus !== 'available') return -1;
+    if (b.workload.availabilityStatus === 'available' && a.workload.availabilityStatus !== 'available') return 1;
+    return a.workload.activeOrders - b.workload.activeOrders;
+  });
+
+  res.status(200).json({
+    success: true,
+    count: pickupBoysWithWorkload.length,
+    data: pickupBoysWithWorkload,
+    summary: {
+      available: pickupBoysWithWorkload.filter(pb => pb.workload.availabilityStatus === 'available').length,
+      busy: pickupBoysWithWorkload.filter(pb => pb.workload.availabilityStatus === 'busy').length,
+      overloaded: pickupBoysWithWorkload.filter(pb => pb.workload.availabilityStatus === 'overloaded').length,
+      canTakeOrders: pickupBoysWithWorkload.filter(pb => pb.workload.canTakeNewOrder).length
+    }
+  });
+});
+
+// @desc    Get pickup boy performance metrics
+// @route   GET /api/users/pickup-boys/:id/performance
+// @access  Private/Admin/Manager
+export const getPickupBoyPerformance = asyncHandler(async (req, res, next) => {
+  const pickupBoy = await User.findOne({ 
+    _id: req.params.id, 
+    role: 'pickup_boy' 
+  }).select('firstName lastName email phone');
+
+  if (!pickupBoy) {
+    return next(new ErrorResponse('Pickup boy not found', 404));
+  }
+
+  const now = new Date();
+  const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfWeek = new Date(now.setDate(now.getDate() - now.getDay()));
+
+  const [
+    totalAssigned,
+    totalCompleted,
+    monthlyCompleted,
+    weeklyCompleted,
+    averageRating,
+    activeOrders
+  ] = await Promise.all([
+    Order.countDocuments({ assignedPickupBoy: req.params.id }),
+    Order.countDocuments({ assignedPickupBoy: req.params.id, status: 'completed' }),
+    Order.countDocuments({ 
+      assignedPickupBoy: req.params.id, 
+      status: 'completed',
+      updatedAt: { $gte: startOfMonth }
+    }),
+    Order.countDocuments({ 
+      assignedPickupBoy: req.params.id, 
+      status: 'completed',
+      updatedAt: { $gte: startOfWeek }
+    }),
+    Order.aggregate([
+      { $match: { assignedPickupBoy: pickupBoy._id, status: 'completed' } },
+      { $group: { _id: null, avgRating: { $avg: '$customerRating.rating' } } }
+    ]),
+    Order.countDocuments({
+      assignedPickupBoy: req.params.id,
+      status: { $in: ['assigned', 'in_transit', 'picked_up'] }
+    })
+  ]);
+
+  const completionRate = totalAssigned > 0 ? ((totalCompleted / totalAssigned) * 100).toFixed(2) : 0;
+
+  res.status(200).json({
+    success: true,
+    data: {
+      pickupBoy,
+      performance: {
+        totalAssigned,
+        totalCompleted,
+        completionRate: `${completionRate}%`,
+        monthlyCompleted,
+        weeklyCompleted,
+        activeOrders,
+        averageRating: averageRating[0]?.avgRating || 0,
+        status: activeOrders > 5 ? 'busy' : 'available'
+      }
+    }
   });
 });
 
@@ -259,17 +435,7 @@ export const resetUserPassword = asyncHandler(async (req, res, next) => {
 
   // Send password reset notification email
   try {
-    await emailService.sendCustomEmail(
-      user.email,
-      'Password Reset Notification',
-      `
-        <h2>Password Reset</h2>
-        <p>Your password has been reset by an administrator.</p>
-        <p>Your new temporary password is: <strong>${newPassword}</strong></p>
-        <p>Please log in and change your password immediately.</p>
-        <a href="${process.env.FRONTEND_URL}/login" style="background: #22c55e; color: white; padding: 10px 20px; text-decoration: none; border-radius: 5px;">Login Now</a>
-      `
-    );
+    await emailService.sendPasswordResetNotification(user, newPassword);
   } catch (emailError) {
     console.error('Failed to send password reset email:', emailError);
   }
@@ -301,5 +467,41 @@ export const notifyUser = asyncHandler(async (req, res, next) => {
     });
   } catch (error) {
     return next(new ErrorResponse('Failed to send notification', 500));
+  }
+});
+
+// @desc    Send assignment notification to pickup boy
+// @route   POST /api/users/:id/notify-assignment
+// @access  Private/Admin/Manager  
+export const notifyPickupBoyAssignment = asyncHandler(async (req, res, next) => {
+  const { orderId } = req.body;
+
+  const pickupBoy = await User.findOne({ 
+    _id: req.params.id, 
+    role: 'pickup_boy' 
+  });
+
+  if (!pickupBoy) {
+    return next(new ErrorResponse('Pickup boy not found', 404));
+  }
+
+  const order = await Order.findById(orderId)
+    .populate('customerId', 'firstName lastName phone')
+    .populate('items.categoryId', 'name');
+
+  if (!order) {
+    return next(new ErrorResponse('Order not found', 404));
+  }
+
+  try {
+    await emailService.sendPickupBoyAssignmentNotification(pickupBoy, order);
+    
+    res.status(200).json({
+      success: true,
+      message: 'Assignment notification sent to pickup boy'
+    });
+  } catch (error) {
+    console.error('Failed to send assignment notification:', error);
+    return next(new ErrorResponse('Failed to send assignment notification', 500));
   }
 });

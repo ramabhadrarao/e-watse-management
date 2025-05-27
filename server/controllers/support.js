@@ -1,10 +1,11 @@
 // server/controllers/support.js
-// Support ticket management controller
+// FIXED: Support ticket management controller with proper route handling
 
 import SupportTicket from '../models/SupportTicket.js';
 import { asyncHandler } from '../middleware/async.js';
 import { ErrorResponse } from '../utils/errorResponse.js';
 import { emailService } from '../services/emailService.js';
+import mongoose from 'mongoose';
 
 // @desc    Create new support ticket
 // @route   POST /api/support
@@ -88,6 +89,11 @@ export const getUserSupportTickets = asyncHandler(async (req, res, next) => {
 // @route   GET /api/support/:id
 // @access  Private
 export const getSupportTicket = asyncHandler(async (req, res, next) => {
+  // FIXED: Check if id is valid ObjectId before querying
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid ticket ID format`, 400));
+  }
+
   let query = SupportTicket.findById(req.params.id)
     .populate('customerId', 'firstName lastName email phone')
     .populate('orderId', 'orderNumber')
@@ -116,6 +122,11 @@ export const getSupportTicket = asyncHandler(async (req, res, next) => {
 // @access  Private
 export const addTicketMessage = asyncHandler(async (req, res, next) => {
   const { message, isInternal = false } = req.body;
+
+  // FIXED: Check if id is valid ObjectId
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid ticket ID format`, 400));
+  }
 
   let ticket = await SupportTicket.findById(req.params.id);
 
@@ -166,6 +177,11 @@ export const addTicketMessage = asyncHandler(async (req, res, next) => {
 export const updateTicketStatus = asyncHandler(async (req, res, next) => {
   const { status, resolutionNote } = req.body;
 
+  // FIXED: Check if id is valid ObjectId
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid ticket ID format`, 400));
+  }
+
   let ticket = await SupportTicket.findById(req.params.id);
 
   if (!ticket) {
@@ -202,6 +218,11 @@ export const updateTicketStatus = asyncHandler(async (req, res, next) => {
 export const assignSupportTicket = asyncHandler(async (req, res, next) => {
   const { assignedTo } = req.body;
 
+  // FIXED: Check if id is valid ObjectId
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid ticket ID format`, 400));
+  }
+
   let ticket = await SupportTicket.findById(req.params.id);
 
   if (!ticket) {
@@ -231,13 +252,13 @@ export const getAllSupportTickets = asyncHandler(async (req, res, next) => {
 
   let query = SupportTicket.find();
 
-  if (status) {
+  if (status && status !== 'all') {
     query = query.where({ status });
   }
-  if (priority) {
+  if (priority && priority !== 'all') {
     query = query.where({ priority });
   }
-  if (category) {
+  if (category && category !== 'all') {
     query = query.where({ category });
   }
 
@@ -276,11 +297,51 @@ export const getAllSupportTickets = asyncHandler(async (req, res, next) => {
   });
 });
 
+// @desc    Get support ticket statistics
+// @route   GET /api/support/stats
+// @access  Private/Admin/Manager
+export const getSupportStats = asyncHandler(async (req, res, next) => {
+  const stats = await Promise.all([
+    SupportTicket.countDocuments({ status: 'open' }),
+    SupportTicket.countDocuments({ status: 'in_progress' }),
+    SupportTicket.countDocuments({ status: 'resolved' }),
+    SupportTicket.countDocuments({ status: 'closed' }),
+    SupportTicket.countDocuments({ priority: 'urgent' }),
+    SupportTicket.countDocuments({ priority: 'high' }),
+    SupportTicket.countDocuments({
+      createdAt: {
+        $gte: new Date(new Date().setDate(new Date().getDate() - 7))
+      }
+    })
+  ]);
+
+  const [open, inProgress, resolved, closed, urgent, high, thisWeek] = stats;
+
+  res.status(200).json({
+    success: true,
+    data: {
+      total: open + inProgress + resolved + closed,
+      open,
+      inProgress,
+      resolved,
+      closed,
+      urgent,
+      high,
+      thisWeek
+    }
+  });
+});
+
 // @desc    Rate support ticket
 // @route   PUT /api/support/:id/rate
 // @access  Private
 export const rateSupportTicket = asyncHandler(async (req, res, next) => {
   const { rating, feedback } = req.body;
+
+  // FIXED: Check if id is valid ObjectId
+  if (!mongoose.Types.ObjectId.isValid(req.params.id)) {
+    return next(new ErrorResponse(`Invalid ticket ID format`, 400));
+  }
 
   let ticket = await SupportTicket.findById(req.params.id);
 
