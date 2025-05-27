@@ -1,4 +1,16 @@
+// server/routes/orders.js
 import express from 'express';
+import {
+  createOrder,
+  getUserOrders,
+  getOrder,
+  cancelOrder,
+  getAllOrders,
+  updateOrderStatus,
+  assignPickupBoy,
+  getAssignedOrders,
+  verifyPickupPin
+} from '../controllers/orders.js';
 import { protect, authorize } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -8,61 +20,19 @@ router.use(protect);
 
 // Customer routes
 router.route('/')
-  .post((req, res) => {
-    res.status(201).json({ success: true, message: 'Create order' });
-  })
-  .get((req, res) => {
-    res.status(200).json({ success: true, message: 'Get user orders' });
-  });
+  .post(createOrder)
+  .get(getUserOrders);
 
-router.get('/:id', (req, res) => {
-  res.status(200).json({ 
-    success: true, 
-    message: 'Get order by ID',
-    id: req.params.id
-  });
-});
-
-router.put('/:id/cancel', (req, res) => {
-  res.status(200).json({ 
-    success: true, 
-    message: 'Cancel order',
-    id: req.params.id
-  });
-});
+router.get('/:id', getOrder);
+router.put('/:id/cancel', cancelOrder);
 
 // Admin/Manager routes
-router.get('/all', authorize('admin', 'manager'), (req, res) => {
-  res.status(200).json({ success: true, message: 'Get all orders' });
-});
-
-router.put('/:id/status', authorize('admin', 'manager', 'pickup_boy'), (req, res) => {
-  res.status(200).json({ 
-    success: true, 
-    message: 'Update order status',
-    id: req.params.id
-  });
-});
-
-router.put('/:id/assign', authorize('admin', 'manager'), (req, res) => {
-  res.status(200).json({ 
-    success: true, 
-    message: 'Assign pickup boy',
-    id: req.params.id
-  });
-});
+router.get('/all', authorize('admin', 'manager'), getAllOrders);
+router.put('/:id/status', authorize('admin', 'manager', 'pickup_boy'), updateOrderStatus);
+router.put('/:id/assign', authorize('admin', 'manager'), assignPickupBoy);
 
 // Pickup Boy routes
-router.get('/assigned', authorize('pickup_boy'), (req, res) => {
-  res.status(200).json({ success: true, message: 'Get assigned orders' });
-});
-
-router.put('/:id/verify', authorize('pickup_boy'), (req, res) => {
-  res.status(200).json({ 
-    success: true, 
-    message: 'Verify pickup pin',
-    id: req.params.id
-  });
-});
+router.get('/assigned', authorize('pickup_boy'), getAssignedOrders);
+router.put('/:id/verify', authorize('pickup_boy'), verifyPickupPin);
 
 export default router;

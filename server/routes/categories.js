@@ -1,44 +1,29 @@
+// server/routes/categories.js
 import express from 'express';
+import {
+  getCategories,
+  getCategory,
+  createCategory,
+  updateCategory,
+  deleteCategory
+} from '../controllers/categories.js';
 import { protect, authorize } from '../middleware/auth.js';
 
 const router = express.Router();
 
-// Public routes for viewing categories
-router.get('/', (req, res) => {
-  res.status(200).json({ success: true, message: 'Get all categories' });
-});
-
-router.get('/:id', (req, res) => {
-  res.status(200).json({ 
-    success: true, 
-    message: 'Get category by ID',
-    id: req.params.id
-  });
-});
+// Public routes
+router.get('/', getCategories);
+router.get('/:id', getCategory);
 
 // Protect all routes after this middleware
 router.use(protect);
 
 // Admin only routes
 router.route('/')
-  .post(authorize('admin'), (req, res) => {
-    res.status(201).json({ success: true, message: 'Create category' });
-  });
+  .post(authorize('admin'), createCategory);
 
 router.route('/:id')
-  .put(authorize('admin'), (req, res) => {
-    res.status(200).json({ 
-      success: true, 
-      message: 'Update category',
-      id: req.params.id
-    });
-  })
-  .delete(authorize('admin'), (req, res) => {
-    res.status(200).json({ 
-      success: true, 
-      message: 'Delete category',
-      id: req.params.id
-    });
-  });
+  .put(authorize('admin'), updateCategory)
+  .delete(authorize('admin'), deleteCategory);
 
 export default router;

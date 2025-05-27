@@ -1,3 +1,7 @@
+// src/App.tsx
+// Main App component with updated routing for all pages
+// Includes all dashboard routes and order details
+
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
 import { ToastContainer } from 'react-toastify';
@@ -8,7 +12,7 @@ import 'react-toastify/dist/ReactToastify.css';
 import MainLayout from './layouts/MainLayout';
 import DashboardLayout from './layouts/DashboardLayout';
 
-// Pages
+// Public Pages
 import HomePage from './pages/HomePage';
 import AboutPage from './pages/AboutPage';
 import ServicesPage from './pages/ServicesPage';
@@ -22,6 +26,7 @@ import UserDashboard from './pages/dashboard/UserDashboard';
 import MyPickups from './pages/dashboard/MyPickups';
 import NewPickupRequest from './pages/dashboard/NewPickupRequest';
 import UserProfile from './pages/dashboard/UserProfile';
+import OrderDetails from './pages/dashboard/OrderDetails';
 
 // Context
 import { AuthProvider } from './context/AuthContext';
@@ -57,6 +62,7 @@ function App() {
             >
               <Route index element={<UserDashboard />} />
               <Route path="pickups" element={<MyPickups />} />
+              <Route path="pickups/:id" element={<OrderDetails />} />
               <Route path="request" element={<NewPickupRequest />} />
               <Route path="profile" element={<UserProfile />} />
             </Route>
