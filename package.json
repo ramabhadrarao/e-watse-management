@@ -9,7 +9,10 @@
     "lint": "eslint .",
     "preview": "vite preview",
     "server": "node server/index.js",
-    "dev:full": "concurrently \"npm run dev\" \"npm run server\""
+    "server:dev": "nodemon server/index.js",
+    "dev:full": "concurrently \"npm run dev\" \"npm run server:dev\"",
+    "seed": "node server/seed/seedDatabase.js",
+    "setup": "npm install && npm run seed"
   },
   "dependencies": {
     "lucide-react": "^0.344.0",

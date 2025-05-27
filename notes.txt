@@ -1,0 +1,7 @@
+
+Test Accounts Created:
+📧 Admin: admin@example.com | 🔑 password123
+📧 Customer: customer@example.com | 🔑 password123
+📧 Pickup Boy: pickup@example.com | 🔑 password123
+📧 Manager: manager@example.com | 🔑 password123
+📧 Customer 2: customer2@example.com | 🔑 password123

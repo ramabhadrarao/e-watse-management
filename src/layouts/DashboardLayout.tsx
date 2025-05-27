@@ -9,8 +9,8 @@ const DashboardLayout: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  const handleLogout = () => {
-    logout();
+  const handleLogout = async () => {
+    await logout();
     navigate('/');
   };
 
@@ -61,10 +61,13 @@ const DashboardLayout: React.FC = () => {
           <div className="p-4 border-b border-gray-200">
             <div className="flex items-center space-x-3">
               <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center">
-                <span className="text-green-600 font-semibold">{user?.firstName?.charAt(0)}{user?.lastName?.charAt(0)}</span>
+                <span className="text-green-600 font-semibold">
+                  {user?.firstName?.charAt(0) || 'U'}{user?.lastName?.charAt(0) || 'U'}
+                </span>
               </div>
               <div>
                 <div className="font-medium">{user?.firstName} {user?.lastName}</div>
+                <div className="text-xs text-gray-500 capitalize">{user?.role}</div>
                 <div className="text-xs text-gray-500">{user?.email}</div>
               </div>
             </div>
@@ -84,6 +87,7 @@ const DashboardLayout: React.FC = () => {
                         : 'text-gray-700 hover:bg-gray-50 hover:text-green-500'
                       }
                     `}
+                    onClick={() => setSidebarOpen(false)} // Close mobile sidebar on navigation
                   >
                     <span className={location.pathname === item.href ? 'text-green-500' : 'text-gray-400'}>
                       {item.icon}
@@ -107,6 +111,14 @@ const DashboardLayout: React.FC = () => {
           </div>
         </div>
       </div>
+
+      {/* Overlay for mobile */}
+      {sidebarOpen && (
+        <div 
+          className="lg:hidden fixed inset-0 bg-black bg-opacity-50 z-5"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
 
       {/* Main Content */}
       <div className="lg:ml-64">

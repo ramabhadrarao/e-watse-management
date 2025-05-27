@@ -1,5 +1,5 @@
 import React, { useContext } from 'react';
-import { Navigate } from 'react-router-dom';
+import { Navigate, useLocation } from 'react-router-dom';
 import AuthContext from '../../context/AuthContext';
 import LoadingSpinner from '../ui/LoadingSpinner';
 
@@ -13,17 +13,20 @@ const PrivateRoute: React.FC<PrivateRouteProps> = ({
   requiredRole 
 }) => {
   const { isAuthenticated, user, loading } = useContext(AuthContext);
+  const location = useLocation();
 
   if (loading) {
-    return <LoadingSpinner />;
+    return <LoadingSpinner fullScreen />;
   }
 
   if (!isAuthenticated) {
-    return <Navigate to="/login" />;
+    // Redirect to login page with return url
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
 
   if (requiredRole && user?.role !== requiredRole) {
-    return <Navigate to="/dashboard" />;
+    // If user doesn't have required role, redirect to their appropriate dashboard
+    return <Navigate to="/dashboard" replace />;
   }
 
   return <>{children}</>;

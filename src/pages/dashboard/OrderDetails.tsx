@@ -141,9 +141,7 @@ const OrderDetails: React.FC = () => {
           )}
         </div>
       </div>
-  };
-
-export default OrderDetails;
+    );
   }
 
   return (
@@ -486,5 +484,6 @@ export default OrderDetails;
       </div>
     </div>
   );
+};
 
 export default OrderDetails;

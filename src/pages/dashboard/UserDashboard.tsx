@@ -1,10 +1,9 @@
 // src/pages/dashboard/UserDashboard.tsx
-// User Dashboard - Real-time overview of user's e-waste recycling activity
-// Features: real-time statistics, recent pickups, environmental impact tracking
+// User Dashboard - Safe loading with proper error handling
 
 import React, { useContext, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { Truck, Package, Activity, UserCircle, Clock, RefreshCw, TrendingUp } from 'lucide-react';
+import { Truck, Package, Activity, Clock, RefreshCw, TrendingUp } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
@@ -30,7 +29,7 @@ const UserDashboard: React.FC = () => {
     const totalItemsProcessed = orders
       .filter(order => order.status === 'completed')
       .reduce((sum, order) => {
-        return sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
+        return sum + order.items.reduce((itemSum: number, item: any) => itemSum + item.quantity, 0);
       }, 0);
 
     // Calculate total earnings from completed orders
@@ -88,7 +87,7 @@ const UserDashboard: React.FC = () => {
     <div>
       <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
         <div>
-          <h1 className="text-2xl font-bold text-gray-900">Welcome, {user?.firstName}!</h1>
+          <h1 className="text-2xl font-bold text-gray-900">Welcome, {user?.firstName || 'User'}!</h1>
           <p className="text-gray-600">Here's an overview of your e-waste recycling activity</p>
         </div>
         <div className="mt-4 md:mt-0 flex space-x-3">
@@ -226,7 +225,7 @@ const UserDashboard: React.FC = () => {
                 </tr>
               </thead>
               <tbody className="bg-white divide-y divide-gray-200">
-                {recentOrders.map((order) => (
+                {recentOrders.map((order: any) => (
                   <tr key={order._id}>
                     <td className="px-6 py-4 whitespace-nowrap text-sm font-medium text-gray-900">
                       {order.orderNumber}

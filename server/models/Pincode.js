@@ -63,8 +63,7 @@ const pincodeSchema = new mongoose.Schema({
   timestamps: true
 });
 
-// Index for faster searches
-pincodeSchema.index({ pincode: 1 });
+// Remove the duplicate index - only use schema-level indexing
 pincodeSchema.index({ city: 1, state: 1 });
 
 export default mongoose.model('Pincode', pincodeSchema);
