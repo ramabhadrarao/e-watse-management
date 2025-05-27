@@ -1,5 +1,5 @@
 // src/App.tsx
-// Fixed App component with proper imports and routing including all admin and pickup boy routes
+// Enhanced App component with complete role-based routing including pickup boy routes
 
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
@@ -27,14 +27,20 @@ import NewPickupRequest from './pages/dashboard/NewPickupRequest';
 import UserProfile from './pages/dashboard/UserProfile';
 import OrderDetails from './pages/dashboard/OrderDetails';
 import SupportTickets from './pages/dashboard/SupportTickets';
+import SupportTicketDetails from './pages/dashboard/SupportTicketDetails';
 
 // Admin Pages
 import AdminDashboard from './pages/dashboard/AdminDashboard';
 import UserManagement from './pages/dashboard/admin/UserManagement';
 import Analytics from './pages/dashboard/admin/Analytics';
+import AssignmentDashboard from './pages/dashboard/admin/AssignmentDashboard';
 
 // Pickup Boy Pages
 import PickupBoyDashboard from './pages/dashboard/pickup/PickupBoyDashboard';
+import RouteOptimization from './pages/dashboard/pickup/RouteOptimization';
+
+// Customer Pages
+import CustomerDashboard from './pages/dashboard/customer/CustomerDashboard';
 
 // Context
 import { AuthProvider } from './context/AuthContext';
@@ -86,15 +92,34 @@ function App() {
                 </PrivateRoute>
               }
             >
-              {/* Default dashboard route - role-based */}
+              {/* Role-based default dashboard route */}
               <Route index element={<UserDashboard />} />
               
               {/* Customer Routes */}
-              <Route path="pickups" element={<MyPickups />} />
-              <Route path="pickups/:id" element={<OrderDetails />} />
-              <Route path="request" element={<NewPickupRequest />} />
-              <Route path="support" element={<SupportTickets />} />
-              <Route path="profile" element={<UserProfile />} />
+              <Route 
+                path="pickups" 
+                element={
+                  <PrivateRoute requiredRole="customer">
+                    <MyPickups />
+                  </PrivateRoute>
+                } 
+              />
+              <Route 
+                path="pickups/:id" 
+                element={
+                  <PrivateRoute requiredRole="customer">
+                    <OrderDetails />
+                  </PrivateRoute>
+                } 
+              />
+              <Route 
+                path="request" 
+                element={
+                  <PrivateRoute requiredRole="customer">
+                    <NewPickupRequest />
+                  </PrivateRoute>
+                } 
+              />
               
               {/* Admin Routes */}
               <Route 
@@ -121,6 +146,14 @@ function App() {
                   </PrivateRoute>
                 } 
               />
+              <Route 
+                path="assignments" 
+                element={
+                  <PrivateRoute requiredRole="admin,manager">
+                    <AssignmentDashboard />
+                  </PrivateRoute>
+                } 
+              />
               
               {/* Pickup Boy Routes */}
               <Route 
@@ -130,6 +163,42 @@ function App() {
                     <PickupBoyDashboard />
                   </PrivateRoute>
                 } 
+              />
+              <Route 
+                path="route" 
+                element={
+                  <PrivateRoute requiredRole="pickup_boy">
+                    <RouteOptimization />
+                  </PrivateRoute>
+                } 
+              />
+              <Route 
+                path="history" 
+                element={
+                  <PrivateRoute requiredRole="pickup_boy">
+                    <MyPickups />
+                  </PrivateRoute>
+                } 
+              />
+              
+              {/* Shared Routes (Multiple Roles) */}
+              <Route 
+                path="support" 
+                element={<SupportTickets />} 
+              />
+              <Route 
+                path="support/:id" 
+                element={<SupportTicketDetails />} 
+              />
+              <Route 
+                path="profile" 
+                element={<UserProfile />} 
+              />
+              
+              {/* Order details - accessible by multiple roles */}
+              <Route 
+                path="orders/:id" 
+                element={<OrderDetails />} 
               />
             </Route>
             
