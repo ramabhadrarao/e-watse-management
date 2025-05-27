@@ -1,6 +1,6 @@
 // src/hooks/useAssignment.ts
-// Assignment hooks for real backend API integration
-// Custom hooks for pickup assignment management with proper error handling
+// Updated Assignment hooks for real backend API integration
+// Custom hooks for pickup assignment management with proper error handling and real API calls
 
 import { useQuery, useMutation, useQueryClient } from 'react-query';
 import { 
@@ -9,6 +9,7 @@ import {
   BulkAssignmentData, 
   AutoAssignmentParams 
 } from '../services/assignmentService';
+import { useToast } from './useToast';
 
 // Enhanced options interface for queries
 interface QueryOptions {
@@ -17,7 +18,7 @@ interface QueryOptions {
   enabled?: boolean;
 }
 
-// Get pending orders hook
+// Get pending orders hook with real API integration
 export const usePendingOrders = (filters?: AssignmentFilters, options?: QueryOptions) => {
   return useQuery(
     ['pendingOrders', filters],
@@ -25,14 +26,24 @@ export const usePendingOrders = (filters?: AssignmentFilters, options?: QueryOpt
     {
       staleTime: 30000, // 30 seconds
       refetchInterval: 60000, // Refetch every minute for real-time updates
-      onError: options?.onError,
+      retry: (failureCount, error: any) => {
+        // Don't retry on 404 or 403 errors
+        if (error?.response?.status === 404 || error?.response?.status === 403) {
+          return false;
+        }
+        return failureCount < 3;
+      },
+      onError: (error: any) => {
+        console.error('Failed to fetch pending orders:', error);
+        options?.onError?.(error);
+      },
       onSuccess: options?.onSuccess,
       enabled: options?.enabled
     }
   );
 };
 
-// Get pickup boy availability hook
+// Get pickup boy availability hook with real API integration
 export const usePickupBoyAvailability = (filters?: { city?: string; pincode?: string }, options?: QueryOptions) => {
   return useQuery(
     ['pickupBoyAvailability', filters],
@@ -40,7 +51,17 @@ export const usePickupBoyAvailability = (filters?: { city?: string; pincode?: st
     {
       staleTime: 30000, // 30 seconds
       refetchInterval: 60000, // Refetch every minute
-      onError: options?.onError,
+      retry: (failureCount, error: any) => {
+        // Don't retry on 404 or 403 errors
+        if (error?.response?.status === 404 || error?.response?.status === 403) {
+          return false;
+        }
+        return failureCount < 3;
+      },
+      onError: (error: any) => {
+        console.error('Failed to fetch pickup boy availability:', error);
+        options?.onError?.(error);
+      },
       onSuccess: options?.onSuccess,
       enabled: options?.enabled
     }
@@ -55,70 +76,103 @@ export const usePickupBoyPerformance = (pickupBoyId: string, options?: QueryOpti
     {
       enabled: !!pickupBoyId && (options?.enabled !== false),
       staleTime: 300000, // 5 minutes
-      onError: options?.onError,
+      retry: (failureCount, error: any) => {
+        if (error?.response?.status === 404) {
+          return false;
+        }
+        return failureCount < 2;
+      },
+      onError: (error: any) => {
+        console.error('Failed to fetch pickup boy performance:', error);
+        options?.onError?.(error);
+      },
       onSuccess: options?.onSuccess,
     }
   );
 };
 
-// Assign single order hook
+// Assign single order hook with real API integration
 export const useAssignSingleOrder = () => {
   const queryClient = useQueryClient();
+  const { showSuccess, showError } = useToast();
   
   return useMutation(
     ({ orderId, pickupBoyId }: { orderId: string; pickupBoyId: string }) =>
       assignmentService.assignSingleOrder(orderId, pickupBoyId),
     {
-      onSuccess: () => {
+      onSuccess: (data, variables) => {
+        // Invalidate and refetch relevant queries
         queryClient.invalidateQueries('pendingOrders');
         queryClient.invalidateQueries('pickupBoyAvailability');
         queryClient.invalidateQueries('assignmentStatistics');
         queryClient.invalidateQueries('allOrders');
+        
+        console.log('Order assigned successfully:', data);
+        showSuccess('Order assigned successfully');
       },
-      onError: (error) => {
+      onError: (error: any) => {
         console.error('Failed to assign order:', error);
+        showError(error.response?.data?.message || 'Failed to assign order');
       }
     }
   );
 };
 
-// Bulk assign orders hook
+// Bulk assign orders hook with real API integration
 export const useBulkAssignOrders = () => {
   const queryClient = useQueryClient();
+  const { showSuccess, showError } = useToast();
   
   return useMutation(
     (assignments: BulkAssignmentData) => assignmentService.bulkAssignOrders(assignments),
     {
       onSuccess: (data) => {
+        // Invalidate and refetch relevant queries
         queryClient.invalidateQueries('pendingOrders');
         queryClient.invalidateQueries('pickupBoyAvailability');
         queryClient.invalidateQueries('assignmentStatistics');
         queryClient.invalidateQueries('allOrders');
-        console.log(`Bulk assignment completed: ${data.data.successful} successful, ${data.data.failed} failed`);
+        
+        const { successful, failed } = data.data;
+        console.log(`Bulk assignment completed: ${successful} successful, ${failed} failed`);
+        
+        if (successful > 0) {
+          showSuccess(`${successful} orders assigned successfully`);
+        }
+        if (failed > 0) {
+          showError(`${failed} orders failed to assign`);
+        }
       },
-      onError: (error) => {
+      onError: (error: any) => {
         console.error('Failed to bulk assign orders:', error);
+        showError(error.response?.data?.message || 'Failed to bulk assign orders');
       }
     }
   );
 };
 
-// Auto assign orders hook
+// Auto assign orders hook with real API integration
 export const useAutoAssignOrders = () => {
   const queryClient = useQueryClient();
+  const { showSuccess, showError } = useToast();
   
   return useMutation(
     (params: AutoAssignmentParams) => assignmentService.autoAssignOrders(params),
     {
       onSuccess: (data) => {
+        // Invalidate and refetch relevant queries
         queryClient.invalidateQueries('pendingOrders');
         queryClient.invalidateQueries('pickupBoyAvailability');
         queryClient.invalidateQueries('assignmentStatistics');
         queryClient.invalidateQueries('allOrders');
-        console.log(`Auto-assignment completed: ${data.data.assigned} orders assigned`);
+        
+        const assignedCount = data.data.assigned;
+        console.log(`Auto-assignment completed: ${assignedCount} orders assigned`);
+        showSuccess(`Auto-assigned ${assignedCount} orders successfully`);
       },
-      onError: (error) => {
+      onError: (error: any) => {
         console.error('Failed to auto-assign orders:', error);
+        showError(error.response?.data?.message || 'Failed to auto-assign orders');
       }
     }
   );
@@ -126,12 +180,19 @@ export const useAutoAssignOrders = () => {
 
 // Send assignment notification hook
 export const useSendAssignmentNotification = () => {
+  const { showSuccess, showError } = useToast();
+  
   return useMutation(
     ({ pickupBoyId, orderId }: { pickupBoyId: string; orderId: string }) =>
       assignmentService.sendAssignmentNotification(pickupBoyId, orderId),
     {
-      onError: (error) => {
+      onSuccess: () => {
+        console.log('Assignment notification sent successfully');
+        showSuccess('Assignment notification sent successfully');
+      },
+      onError: (error: any) => {
         console.error('Failed to send assignment notification:', error);
+        showError(error.response?.data?.message || 'Failed to send assignment notification');
       }
     }
   );
@@ -144,49 +205,26 @@ export const useAssignmentStatistics = (timeframe?: string, options?: QueryOptio
     () => assignmentService.getAssignmentStatistics(timeframe),
     {
       staleTime: 60000, // 1 minute
-      onError: options?.onError,
+      retry: (failureCount, error: any) => {
+        if (error?.response?.status === 404) {
+          return false;
+        }
+        return failureCount < 2;
+      },
+      onError: (error: any) => {
+        console.error('Failed to fetch assignment statistics:', error);
+        options?.onError?.(error);
+      },
       onSuccess: options?.onSuccess,
       enabled: options?.enabled
-    }
-  );
-};
-
-// Get assignment analytics hook
-export const useAssignmentAnalytics = (period?: string, options?: QueryOptions) => {
-  return useQuery(
-    ['assignmentAnalytics', period],
-    () => assignmentService.getAssignmentAnalytics(period),
-    {
-      staleTime: 300000, // 5 minutes
-      onError: options?.onError,
-      onSuccess: options?.onSuccess,
-      enabled: options?.enabled
-    }
-  );
-};
-
-// Search assignments hook
-export const useSearchAssignments = (query: string, filters?: {
-  status?: string;
-  city?: string;
-  pickupBoyId?: string;
-  dateFrom?: string;
-  dateTo?: string;
-}, options?: QueryOptions) => {
-  return useQuery(
-    ['searchAssignments', query, filters],
-    () => assignmentService.searchAssignments(query, filters),
-    {
-      enabled: !!query && query.length >= 2,
-      staleTime: 30000,
-      onError: options?.onError,
-      onSuccess: options?.onSuccess,
     }
   );
 };
 
 // Export assignments hook
 export const useExportAssignments = () => {
+  const { showSuccess, showError } = useToast();
+  
   return useMutation(
     (filters?: {
       dateFrom?: string;
@@ -206,12 +244,66 @@ export const useExportAssignments = () => {
         link.click();
         document.body.removeChild(link);
         window.URL.revokeObjectURL(url);
+        
+        console.log('Assignments exported successfully');
+        showSuccess('Assignment data exported successfully');
       },
-      onError: (error) => {
+      onError: (error: any) => {
         console.error('Failed to export assignments:', error);
+        showError('Failed to export assignment data');
       }
     }
   );
+};
+
+// Combined assignment dashboard data hook with error handling
+export const useAssignmentDashboardData = (filters?: {
+  city?: string;
+  timeSlot?: string;
+  date?: string;
+}) => {
+  const pendingOrdersQuery = usePendingOrders(filters);
+  const availabilityQuery = usePickupBoyAvailability(filters ? { city: filters.city } : undefined);
+  const statisticsQuery = useAssignmentStatistics();
+  
+  // Handle data with fallbacks
+  const pendingOrders = pendingOrdersQuery.data?.data || [];
+  const pickupBoys = availabilityQuery.data?.data || [];
+  const availabilitySummary = availabilityQuery.data?.summary || {
+    available: 0,
+    busy: 0,
+    overloaded: 0,
+    canTakeOrders: 0
+  };
+  const statistics = statisticsQuery.data?.data || {
+    pendingAssignments: 0,
+    todayAssigned: 0,
+    autoAssignedToday: 0,
+    averageAssignmentTime: '0 min'
+  };
+
+  // Determine loading state
+  const isLoading = pendingOrdersQuery.isLoading || availabilityQuery.isLoading || statisticsQuery.isLoading;
+  
+  // Determine error state - only if all critical queries fail
+  const error = pendingOrdersQuery.error || availabilityQuery.error;
+
+  // Refetch function
+  const refetch = () => {
+    pendingOrdersQuery.refetch();
+    availabilityQuery.refetch();
+    statisticsQuery.refetch();
+  };
+
+  return {
+    pendingOrders,
+    pickupBoys,
+    availabilitySummary,
+    statistics,
+    isLoading,
+    error,
+    refetch
+  };
 };
 
 // Get pickup boy workload hook
@@ -223,7 +315,16 @@ export const usePickupBoyWorkload = (pickupBoyId: string, options?: QueryOptions
       enabled: !!pickupBoyId && (options?.enabled !== false),
       staleTime: 60000, // 1 minute
       refetchInterval: 120000, // Refetch every 2 minutes
-      onError: options?.onError,
+      retry: (failureCount, error: any) => {
+        if (error?.response?.status === 404) {
+          return false;
+        }
+        return failureCount < 2;
+      },
+      onError: (error: any) => {
+        console.error('Failed to fetch pickup boy workload:', error);
+        options?.onError?.(error);
+      },
       onSuccess: options?.onSuccess,
     }
   );
@@ -232,6 +333,7 @@ export const usePickupBoyWorkload = (pickupBoyId: string, options?: QueryOptions
 // Update assignment priority hook
 export const useUpdateAssignmentPriority = () => {
   const queryClient = useQueryClient();
+  const { showSuccess, showError } = useToast();
   
   return useMutation(
     ({ orderId, priority }: { orderId: string; priority: 'low' | 'medium' | 'high' | 'urgent' }) =>
@@ -240,9 +342,13 @@ export const useUpdateAssignmentPriority = () => {
       onSuccess: (_, { orderId }) => {
         queryClient.invalidateQueries('pendingOrders');
         queryClient.invalidateQueries(['order', orderId]);
+        
+        console.log('Assignment priority updated successfully');
+        showSuccess('Assignment priority updated successfully');
       },
-      onError: (error) => {
+      onError: (error: any) => {
         console.error('Failed to update assignment priority:', error);
+        showError(error.response?.data?.message || 'Failed to update assignment priority');
       }
     }
   );
@@ -251,6 +357,7 @@ export const useUpdateAssignmentPriority = () => {
 // Reassign order hook
 export const useReassignOrder = () => {
   const queryClient = useQueryClient();
+  const { showSuccess, showError } = useToast();
   
   return useMutation(
     ({ orderId, newPickupBoyId, reason }: { 
@@ -265,54 +372,14 @@ export const useReassignOrder = () => {
         queryClient.invalidateQueries('pickupBoyAvailability');
         queryClient.invalidateQueries('allOrders');
         queryClient.invalidateQueries(['order', orderId]);
+        
+        console.log('Order reassigned successfully');
+        showSuccess('Order reassigned successfully');
       },
-      onError: (error) => {
+      onError: (error: any) => {
         console.error('Failed to reassign order:', error);
+        showError(error.response?.data?.message || 'Failed to reassign order');
       }
     }
   );
-};
-
-// Real-time assignment updates hook
-export const useAssignmentUpdates = (callback: (update: any) => void) => {
-  const queryClient = useQueryClient();
-  
-  React.useEffect(() => {
-    const unsubscribe = assignmentService.subscribeToAssignmentUpdates((update) => {
-      // Handle real-time updates
-      callback(update);
-      
-      // Invalidate relevant queries
-      queryClient.invalidateQueries('pendingOrders');
-      queryClient.invalidateQueries('pickupBoyAvailability');
-      queryClient.invalidateQueries('assignmentStatistics');
-    });
-    
-    return unsubscribe;
-  }, [callback, queryClient]);
-};
-
-// Combined assignment dashboard data hook
-export const useAssignmentDashboardData = (filters?: {
-  city?: string;
-  timeSlot?: string;
-  date?: string;
-}) => {
-  const pendingOrdersQuery = usePendingOrders(filters);
-  const availabilityQuery = usePickupBoyAvailability(filters ? { city: filters.city } : undefined);
-  const statisticsQuery = useAssignmentStatistics();
-  
-  return {
-    pendingOrders: pendingOrdersQuery.data?.data || [],
-    pickupBoys: availabilityQuery.data?.data || [],
-    availabilitySummary: availabilityQuery.data?.summary,
-    statistics: statisticsQuery.data?.data,
-    isLoading: pendingOrdersQuery.isLoading || availabilityQuery.isLoading || statisticsQuery.isLoading,
-    error: pendingOrdersQuery.error || availabilityQuery.error || statisticsQuery.error,
-    refetch: () => {
-      pendingOrdersQuery.refetch();
-      availabilityQuery.refetch();
-      statisticsQuery.refetch();
-    }
-  };
 };

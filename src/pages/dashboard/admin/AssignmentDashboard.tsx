@@ -1,8 +1,8 @@
 // src/pages/dashboard/admin/AssignmentDashboard.tsx
-// Assignment Dashboard - Complete pickup assignment management system with REAL API integration
+// Real API Assignment Dashboard - Complete pickup assignment management with backend integration
 // Features: pending orders, pickup boy availability, manual/auto assignment, performance tracking
-// Path: /dashboard/admin/assignments
-// Dependencies: Real backend API calls via assignment service
+// Path: /dashboard/assignments
+// Dependencies: Real backend API calls via assignment service hooks
 
 import React, { useState, useContext } from 'react';
 import { 
@@ -26,7 +26,12 @@ import {
   Target,
   Award,
   Navigation,
-  Phone
+  Phone,
+  User,
+  Copy,
+  Calendar,
+  Eye,
+  Star
 } from 'lucide-react';
 import Card from '../../../components/ui/Card';
 import Button from '../../../components/ui/Button';
@@ -55,8 +60,7 @@ const AssignmentDashboard: React.FC = () => {
   const [selectedPickupBoy, setSelectedPickupBoy] = useState<string>('');
   const [autoAssignSettings, setAutoAssignSettings] = useState({
     maxAssignments: 10,
-    city: 'all',
-    enabled: false
+    city: 'all'
   });
   const { showSuccess, showError } = useToast();
 
@@ -181,14 +185,9 @@ const AssignmentDashboard: React.FC = () => {
   };
 
   const handleAutoAssign = async () => {
-    if (!autoAssignSettings.enabled) {
-      showError('Please enable auto-assignment first');
-      return;
-    }
-
     try {
       const params = {
-        maxAssignments: autoAssignSettings.maxOrders,
+        maxAssignments: autoAssignSettings.maxAssignments,
         city: autoAssignSettings.city !== 'all' ? autoAssignSettings.city : undefined
       };
 
@@ -257,8 +256,9 @@ const AssignmentDashboard: React.FC = () => {
   }
 
   return (
-    <div className="max-w-7xl mx-auto">
-      <div className="flex flex-col md:flex-row md:items-center md:justify-between mb-8">
+    <div className="max-w-7xl mx-auto p-6 space-y-6">
+      {/* Header */}
+      <div className="flex flex-col md:flex-row md:items-center md:justify-between">
         <div>
           <h1 className="text-2xl font-bold text-gray-900">Assignment Dashboard</h1>
           <p className="text-gray-600">Manage pickup assignments and optimize routes</p>
@@ -290,107 +290,100 @@ const AssignmentDashboard: React.FC = () => {
       </div>
 
       {/* Statistics Cards */}
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-8">
-        <Card variant="elevated" className="p-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
+        <Card className="p-6 bg-gradient-to-r from-blue-50 to-blue-100 border-blue-200">
           <div className="flex items-center">
-            <div className="bg-amber-100 text-amber-600 p-3 rounded-full mr-4">
-              <Package className="h-6 w-6" />
+            <div className="bg-blue-500 p-3 rounded-full mr-4">
+              <Package className="h-6 w-6 text-white" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">Pending Assignments</p>
-              <p className="text-2xl font-bold text-gray-900">{pendingOrders.length}</p>
-              <p className="text-xs text-amber-600">Need assignment</p>
+              <p className="text-sm font-medium text-blue-800">Pending Assignments</p>
+              <p className="text-2xl font-bold text-blue-900">{pendingOrders.length}</p>
+              <p className="text-xs text-blue-600">Need assignment</p>
             </div>
           </div>
         </Card>
 
-        <Card variant="elevated" className="p-6">
+        <Card className="p-6 bg-gradient-to-r from-green-50 to-green-100 border-green-200">
           <div className="flex items-center">
-            <div className="bg-blue-100 text-blue-600 p-3 rounded-full mr-4">
-              <UserCheck className="h-6 w-6" />
+            <div className="bg-green-500 p-3 rounded-full mr-4">
+              <UserCheck className="h-6 w-6 text-white" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">Today Assigned</p>
-              <p className="text-2xl font-bold text-gray-900">{statistics?.todayAssigned || 0}</p>
-              <p className="text-xs text-blue-600">Manual + Auto</p>
+              <p className="text-sm font-medium text-green-800">Today Assigned</p>
+              <p className="text-2xl font-bold text-green-900">{statistics?.todayAssigned || 0}</p>
+              <p className="text-xs text-green-600">Manual + Auto</p>
             </div>
           </div>
         </Card>
 
-        <Card variant="elevated" className="p-6">
+        <Card className="p-6 bg-gradient-to-r from-purple-50 to-purple-100 border-purple-200">
           <div className="flex items-center">
-            <div className="bg-green-100 text-green-600 p-3 rounded-full mr-4">
-              <Zap className="h-6 w-6" />
+            <div className="bg-purple-500 p-3 rounded-full mr-4">
+              <Zap className="h-6 w-6 text-white" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">Auto-Assigned</p>
-              <p className="text-2xl font-bold text-gray-900">{statistics?.autoAssignedToday || 0}</p>
-              <p className="text-xs text-green-600">Smart assignment</p>
+              <p className="text-sm font-medium text-purple-800">Auto-Assigned</p>
+              <p className="text-2xl font-bold text-purple-900">{statistics?.autoAssignedToday || 0}</p>
+              <p className="text-xs text-purple-600">Smart assignment</p>
             </div>
           </div>
         </Card>
 
-        <Card variant="elevated" className="p-6">
+        <Card className="p-6 bg-gradient-to-r from-amber-50 to-amber-100 border-amber-200">
           <div className="flex items-center">
-            <div className="bg-purple-100 text-purple-600 p-3 rounded-full mr-4">
-              <TrendingUp className="h-6 w-6" />
+            <div className="bg-amber-500 p-3 rounded-full mr-4">
+              <TrendingUp className="h-6 w-6 text-white" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">Avg Assignment Time</p>
-              <p className="text-2xl font-bold text-gray-900">{statistics?.averageAssignmentTime || '0 min'}</p>
-              <p className="text-xs text-purple-600">Processing time</p>
+              <p className="text-sm font-medium text-amber-800">Avg Assignment Time</p>
+              <p className="text-2xl font-bold text-amber-900">{statistics?.averageAssignmentTime || '0 min'}</p>
+              <p className="text-xs text-amber-600">Processing time</p>
             </div>
           </div>
         </Card>
       </div>
 
       {/* Auto Assignment Panel */}
-      <Card variant="elevated" className="p-6 mb-8">
+      <Card className="p-6 bg-gradient-to-r from-green-50 to-blue-50 border border-green-200">
         <div className="flex items-center justify-between mb-4">
           <div className="flex items-center">
             <Zap className="h-6 w-6 text-green-600 mr-2" />
-            <h2 className="text-lg font-semibold text-gray-900">Auto Assignment</h2>
+            <h2 className="text-lg font-semibold text-gray-900">Smart Auto Assignment</h2>
           </div>
-          <div className="flex items-center space-x-3">
-            <label className="flex items-center">
-              <input
-                type="checkbox"
-                checked={autoAssignSettings.enabled}
-                onChange={(e) => setAutoAssignSettings(prev => ({ ...prev, enabled: e.target.checked }))}
-                className="rounded border-gray-300 text-green-600 focus:ring-green-500"
-              />
-              <span className="ml-2 text-sm text-gray-600">Enable Auto Assignment</span>
-            </label>
-            <Button 
-              variant="primary" 
-              onClick={handleAutoAssign}
-              disabled={!autoAssignSettings.enabled}
-              loading={autoAssignMutation.isLoading}
-            >
-              <Play className="h-4 w-4 mr-2" />
-              Run Auto Assignment
-            </Button>
-          </div>
+          <Button 
+            variant="primary" 
+            onClick={handleAutoAssign}
+            loading={autoAssignMutation.isLoading}
+            className="bg-gradient-to-r from-green-500 to-blue-500 hover:from-green-600 hover:to-blue-600"
+          >
+            <Play className="h-4 w-4 mr-2" />
+            Run Auto Assignment
+          </Button>
         </div>
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <Select
-            label="City Filter"
-            options={[
-              { value: 'all', label: 'All Cities' },
-              { value: 'Rajahmundry', label: 'Rajahmundry' },
-              { value: 'Kakinada', label: 'Kakinada' }
-            ]}
-            value={autoAssignSettings.city}
-            onChange={(e) => setAutoAssignSettings(prev => ({ ...prev, city: e.target.value }))}
-          />
-          <Input
-            label="Max Assignments"
-            type="number"
-            min="1"
-            max="50"
-            value={autoAssignSettings.maxOrders.toString()}
-            onChange={(e) => setAutoAssignSettings(prev => ({ ...prev, maxOrders: parseInt(e.target.value) }))}
-          />
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">City Filter</label>
+            <Select
+              options={[
+                { value: 'all', label: 'All Cities' },
+                { value: 'Rajahmundry', label: 'Rajahmundry' },
+                { value: 'Kakinada', label: 'Kakinada' }
+              ]}
+              value={autoAssignSettings.city}
+              onChange={(e) => setAutoAssignSettings(prev => ({ ...prev, city: e.target.value }))}
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-2">Max Assignments</label>
+            <Input
+              type="number"
+              min="1"
+              max="50"
+              value={autoAssignSettings.maxAssignments.toString()}
+              onChange={(e) => setAutoAssignSettings(prev => ({ ...prev, maxAssignments: parseInt(e.target.value) }))}
+            />
+          </div>
           <div className="flex items-end">
             <div className="text-sm text-gray-600">
               {availablePickupBoys.length} pickup boys available for assignment
@@ -407,8 +400,8 @@ const AssignmentDashboard: React.FC = () => {
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Pending Orders */}
         <div className="lg:col-span-2">
-          <Card variant="elevated">
-            <div className="px-6 py-4 border-b border-gray-200">
+          <Card>
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
               <div className="flex items-center justify-between">
                 <h2 className="text-lg font-semibold text-gray-900">
                   Pending Orders ({filteredOrders.length})
@@ -469,9 +462,9 @@ const AssignmentDashboard: React.FC = () => {
                 </div>
               </div>
 
-              <div className="space-y-4">
+              <div className="space-y-4 max-h-96 overflow-y-auto">
                 {filteredOrders.map((order) => (
-                  <div key={order._id} className="border rounded-lg p-4 hover:bg-gray-50">
+                  <div key={order._id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
                     <div className="flex items-start justify-between">
                       <div className="flex items-start space-x-3">
                         <input
@@ -490,24 +483,20 @@ const AssignmentDashboard: React.FC = () => {
                           
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-3">
                             <div className="flex items-start space-x-2">
-                              <MapPin className="h-4 w-4 text-gray-400 mt-1" />
+                              <User className="h-4 w-4 text-gray-400 mt-1" />
                               <div className="text-sm">
                                 <p className="font-medium text-gray-700">
                                   {order.customerId.firstName} {order.customerId.lastName}
                                 </p>
-                                <p className="text-gray-600">
-                                  {order.pickupDetails.address.street}<br />
-                                  {order.pickupDetails.address.city} - {order.pickupDetails.address.pincode}
-                                </p>
+                                <p className="text-gray-600">{order.customerId.phone}</p>
                               </div>
                             </div>
                             <div className="flex items-start space-x-2">
-                              <Clock className="h-4 w-4 text-gray-400 mt-1" />
+                              <MapPin className="h-4 w-4 text-gray-400 mt-1" />
                               <div className="text-sm">
-                                <p className="font-medium text-gray-700">Preferred Schedule:</p>
                                 <p className="text-gray-600">
-                                  {formatDate(order.pickupDetails.preferredDate)}<br />
-                                  {getTimeSlotLabel(order.pickupDetails.timeSlot)}
+                                  {order.pickupDetails.address.street}<br />
+                                  {order.pickupDetails.address.city} - {order.pickupDetails.address.pincode}
                                 </p>
                               </div>
                             </div>
@@ -515,15 +504,20 @@ const AssignmentDashboard: React.FC = () => {
 
                           <div className="flex items-center space-x-4 text-sm text-gray-600">
                             <div className="flex items-center">
+                              <Calendar className="h-4 w-4 mr-1" />
+                              <span>{formatDate(order.pickupDetails.preferredDate)}</span>
+                            </div>
+                            <div className="flex items-center">
+                              <Clock className="h-4 w-4 mr-1" />
+                              <span>{getTimeSlotLabel(order.pickupDetails.timeSlot)}</span>
+                            </div>
+                            <div className="flex items-center">
                               <Package className="h-4 w-4 mr-1" />
                               <span>{order.items.length} item(s)</span>
                             </div>
                             <div className="flex items-center">
                               <TrendingUp className="h-4 w-4 mr-1" />
                               <span>₹{order.pricing.estimatedTotal.toLocaleString()}</span>
-                            </div>
-                            <div className="text-xs text-gray-500">
-                              Created: {formatDate(order.createdAt)}
                             </div>
                           </div>
                         </div>
@@ -548,7 +542,7 @@ const AssignmentDashboard: React.FC = () => {
                         />
                         <Button variant="outline" size="sm">
                           <Phone className="h-4 w-4 mr-2" />
-                          Call Customer
+                          Call
                         </Button>
                       </div>
                     </div>
@@ -574,16 +568,16 @@ const AssignmentDashboard: React.FC = () => {
 
         {/* Pickup Boys Panel */}
         <div>
-          <Card variant="elevated">
-            <div className="px-6 py-4 border-b border-gray-200">
+          <Card>
+            <div className="px-6 py-4 border-b border-gray-200 bg-gray-50">
               <h2 className="text-lg font-semibold text-gray-900">
                 Available Pickup Boys ({availablePickupBoys.length})
               </h2>
             </div>
-            <div className="p-6">
+            <div className="p-6 max-h-96 overflow-y-auto">
               <div className="space-y-4">
                 {pickupBoys.map((boy) => (
-                  <div key={boy._id} className="border rounded-lg p-4">
+                  <div key={boy._id} className="border rounded-lg p-4 hover:bg-gray-50 transition-colors">
                     <div className="flex items-start justify-between mb-3">
                       <div>
                         <h3 className="font-medium text-gray-900">
@@ -609,7 +603,7 @@ const AssignmentDashboard: React.FC = () => {
                       </div>
                       <div className="w-full bg-gray-200 rounded-full h-2">
                         <div 
-                          className="bg-green-500 h-2 rounded-full"
+                          className="bg-green-500 h-2 rounded-full transition-all duration-300"
                           style={{ width: `${(boy.workload.activeOrders / boy.workload.maxCapacity) * 100}%` }}
                         ></div>
                       </div>
@@ -636,13 +630,13 @@ const AssignmentDashboard: React.FC = () => {
                     </div>
 
                     <div className="mt-3 flex space-x-2">
-                      <Button variant="outline" size="sm" fullWidth>
+                      <Button variant="outline" size="sm" className="flex-1">
                         <Navigation className="h-4 w-4 mr-2" />
-                        View Route
+                        Route
                       </Button>
-                      <Button variant="outline" size="sm" fullWidth>
+                      <Button variant="outline" size="sm" className="flex-1">
                         <Activity className="h-4 w-4 mr-2" />
-                        Performance
+                        Stats
                       </Button>
                     </div>
                   </div>

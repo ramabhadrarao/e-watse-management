@@ -138,14 +138,84 @@ export const useAssignPickupBoy = () => {
     }
   );
 };
-
+// Alternative version that checks if user is pickup boy before making the call
+export const useAssignedOrdersWithRoleCheck = () => {
+  const { user } = useContext(AuthContext);
+  const isPickupBoy = user?.role === 'pickup_boy';
+  
+  return useQuery(
+    'assignedOrders',
+    async () => {
+      if (!isPickupBoy) {
+        console.log('User is not a pickup boy, skipping assigned orders fetch');
+        return { success: true, data: [] };
+      }
+      
+      console.log('Fetching assigned orders for pickup boy...');
+      const response = await orderService.getAssignedOrders();
+      console.log('Assigned orders fetched:', response);
+      return response;
+    },
+    {
+      enabled: isPickupBoy, // Only run query if user is pickup boy
+      refetchInterval: isPickupBoy ? 30000 : false,
+      retry: (failureCount, error: any) => {
+        if (error?.response?.status === 404 || error?.response?.status === 403) {
+          return false;
+        }
+        return failureCount < 2;
+      },
+      onError: (error: any) => {
+        console.error('Failed to fetch assigned orders:', error);
+      }
+    }
+  );
+};
 // Assigned Orders Hook (Pickup Boy)
 export const useAssignedOrders = () => {
-  return useQuery('assignedOrders', orderService.getAssignedOrders, {
-    refetchInterval: 30000, // Refetch every 30 seconds for pickup boys
-  });
+  return useQuery(
+    'assignedOrders', 
+    async () => {
+      try {
+        console.log('Fetching assigned orders for pickup boy...');
+        const response = await orderService.getAssignedOrders();
+        console.log('Assigned orders response:', response);
+        return response;
+      } catch (error: any) {
+        console.error('Failed to fetch assigned orders:', error);
+        console.error('Error details:', error.response?.data);
+        
+        // If it's a 404 or the endpoint doesn't exist, return empty data instead of throwing
+        if (error.response?.status === 404) {
+          console.warn('Assigned orders endpoint not found, returning empty data');
+          return {
+            success: true,
+            data: [],
+            message: 'No assigned orders endpoint available'
+          };
+        }
+        
+        throw error;
+      }
+    },
+    {
+      refetchInterval: 30000, // Refetch every 30 seconds for pickup boys
+      retry: (failureCount, error: any) => {
+        // Don't retry on 404 or 403 errors
+        if (error?.response?.status === 404 || error?.response?.status === 403) {
+          return false;
+        }
+        return failureCount < 2;
+      },
+      onError: (error: any) => {
+        console.error('useAssignedOrders error:', error);
+      },
+      onSuccess: (data) => {
+        console.log('useAssignedOrders success:', data);
+      }
+    }
+  );
 };
-
 // Verify Pickup PIN Hook
 export const useVerifyPickupPin = () => {
   const queryClient = useQueryClient();

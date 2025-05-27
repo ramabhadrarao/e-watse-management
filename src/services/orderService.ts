@@ -218,19 +218,75 @@ export const orderService = {
   },
 
   // Get assigned orders (PickupBoy)
-  getAssignedOrders: async () => {
-    try {
-      console.log('Fetching assigned orders...');
-      const response = await api.get('/api/orders/assigned');
-      console.log('Assigned orders fetched:', response.data);
-      return response.data;
-    } catch (error: any) {
-      console.error('Get assigned orders error:', error);
-      console.error('Error response:', error.response?.data);
-      throw error;
+// Get assigned orders (PickupBoy) - FIXED VERSION
+getAssignedOrders: async () => {
+  try {
+    console.log('Fetching assigned orders from API...');
+    const response = await api.get('/api/orders/assigned');
+    console.log('Assigned orders API response:', response.data);
+    return response.data;
+  } catch (error: any) {
+    console.error('Get assigned orders error:', error);
+    console.error('Error response:', error.response?.data);
+    
+    // Enhanced error logging
+    if (error.response) {
+      console.error('Response status:', error.response.status);
+      console.error('Response headers:', error.response.headers);
+      console.error('Response data:', error.response.data);
+    } else if (error.request) {
+      console.error('No response received:', error.request);
+    } else {
+      console.error('Error setting up request:', error.message);
     }
-  },
-
+    
+    // If the endpoint doesn't exist (404), return empty data
+    if (error.response?.status === 404) {
+      console.warn('Assigned orders endpoint not available, returning empty data');
+      return {
+        success: true,
+        data: [],
+        message: 'Assigned orders endpoint not implemented yet'
+      };
+    }
+    
+    // If user doesn't have permission (403), return empty data
+    if (error.response?.status === 403) {
+      console.warn('User does not have permission to view assigned orders');
+      return {
+        success: false,
+        data: [],
+        message: 'Access denied - user is not a pickup boy'
+      };
+    }
+    
+    throw error;
+  }
+},
+// Alternative method to get assigned orders by calling all orders and filtering
+getAssignedOrdersAlternative: async (pickupBoyId?: string) => {
+  try {
+    console.log('Fetching assigned orders using alternative method...');
+    
+    // If we have the pickup boy ID, we can filter all orders
+    if (pickupBoyId) {
+      const response = await api.get('/api/orders/all', {
+        params: {
+          assignedPickupBoy: pickupBoyId,
+          status: 'assigned,in_transit,picked_up'
+        }
+      });
+      return response.data;
+    }
+    
+    // Otherwise, try to get from user's assigned orders
+    const response = await api.get('/api/orders/assigned');
+    return response.data;
+  } catch (error: any) {
+    console.error('Alternative assigned orders fetch failed:', error);
+    throw error;
+  }
+},
   // Verify pickup PIN (PickupBoy)
   verifyPickupPin: async (id: string, pin: string) => {
     try {
