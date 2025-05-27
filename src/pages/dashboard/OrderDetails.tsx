@@ -1,6 +1,8 @@
 // src/pages/dashboard/OrderDetails.tsx
-// Order Details Page - Detailed view of a specific pickup order
-// Features: real-time order data, order timeline, item details, pickup information, status tracking
+// Order Details Page - Detailed view of a specific pickup order with receipt download
+// Features: real-time order data, order timeline, item details, pickup information, status tracking, PDF receipt download
+// Path: /dashboard/pickups/:id
+// Dependencies: Real backend API calls via useOrder hook and useDownloadReceipt hook
 
 import React from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
@@ -25,6 +27,7 @@ import Button from '../../components/ui/Button';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import { ORDER_STATUS } from '../../config';
 import { useOrder, useCancelOrder } from '../../hooks/useOrders';
+import { useDownloadReceipt } from '../../hooks/useReceipt';
 import { useToast } from '../../hooks/useToast';
 
 const OrderDetails: React.FC = () => {
@@ -35,6 +38,7 @@ const OrderDetails: React.FC = () => {
   // API Hooks
   const { data: orderData, isLoading, error, refetch } = useOrder(id!);
   const cancelOrderMutation = useCancelOrder();
+  const downloadReceiptMutation = useDownloadReceipt();
 
   const order = orderData?.data;
 
@@ -112,6 +116,14 @@ const OrderDetails: React.FC = () => {
   const handleRefresh = () => {
     refetch();
     showSuccess('Order details refreshed');
+  };
+
+  const handleDownloadReceipt = () => {
+    if (order.status === 'completed') {
+      downloadReceiptMutation.mutate(order._id);
+    } else {
+      showError('Receipt is only available for completed orders');
+    }
   };
 
   if (isLoading) {
@@ -466,7 +478,14 @@ const OrderDetails: React.FC = () => {
               <h2 className="text-lg font-semibold text-gray-900">Actions</h2>
             </div>
             <div className="p-6 space-y-3">
-              <Button variant="outline" size="sm" fullWidth>
+              <Button 
+                variant="outline" 
+                size="sm" 
+                fullWidth
+                onClick={handleDownloadReceipt}
+                disabled={order.status !== 'completed'}
+                loading={downloadReceiptMutation.isLoading}
+              >
                 <Download className="h-4 w-4 mr-2" />
                 Download Receipt
               </Button>
