@@ -1,5 +1,5 @@
 // src/pages/dashboard/AdminDashboard.tsx
-// Complete Admin Dashboard with Real Data Integration
+// Fixed Admin Dashboard with proper error handling and data loading
 
 import React, { useState, useEffect, useContext } from 'react';
 import { Link } from 'react-router-dom';
@@ -39,6 +39,7 @@ import { useToast } from '../../hooks/useToast';
 import { useAllOrders, useUpdateOrderStatus, useAssignPickupBoy } from '../../hooks/useOrders';
 import { useCategories } from '../../hooks/useCategories';
 import { usePincodes } from '../../hooks/usePincodes';
+import { useAllSupportTickets } from '../../hooks/useSupport';
 
 const AdminDashboard: React.FC = () => {
   const { user } = useContext(AuthContext);
@@ -49,18 +50,38 @@ const AdminDashboard: React.FC = () => {
   const [assigningOrder, setAssigningOrder] = useState<string | null>(null);
   const { showSuccess, showError } = useToast();
 
-  // API Hooks with proper error handling
+  // API Hooks with better error handling
   const { 
     data: ordersData, 
     isLoading: ordersLoading, 
     refetch: refetchOrders, 
-    error: ordersError 
+    error: ordersError,
+    isError: isOrdersError 
   } = useAllOrders({
-    onError: () => showError('Failed to load orders')
+    status: statusFilter !== 'all' ? statusFilter : undefined,
+    search: searchTerm || undefined
+  }, {
+    onError: (error) => {
+      console.error('Orders loading error:', error);
+      showError('Failed to load orders');
+    },
+    enabled: true // Always try to load
   });
   
   const { data: categoriesData, isLoading: categoriesLoading } = useCategories();
   const { data: pincodesData, isLoading: pincodesLoading } = usePincodes();
+  
+  // Support tickets for admin
+  const { 
+    data: supportData, 
+    isLoading: supportLoading,
+    error: supportError 
+  } = useAllSupportTickets({}, {
+    onError: (error) => {
+      console.error('Support tickets loading error:', error);
+    },
+    enabled: user?.role === 'admin' || user?.role === 'manager'
+  });
   
   const updateOrderStatusMutation = useUpdateOrderStatus();
   const assignPickupBoyMutation = useAssignPickupBoy();
@@ -86,15 +107,18 @@ const AdminDashboard: React.FC = () => {
   // Auto-refresh orders every 30 seconds
   useEffect(() => {
     const interval = setInterval(() => {
-      refetchOrders();
+      if (!ordersLoading && !refreshing) {
+        refetchOrders();
+      }
     }, 30000);
     return () => clearInterval(interval);
-  }, [refetchOrders]);
+  }, [refetchOrders, ordersLoading, refreshing]);
 
-  // Calculate dashboard statistics
+  // Calculate dashboard statistics with fallback
   const calculateStats = () => {
     const orders = ordersData?.data || [];
     const categories = categoriesData?.data || [];
+    const supportTickets = supportData?.data || [];
     
     const totalOrders = orders.length;
     const activeOrders = orders.filter(order => 
@@ -114,13 +138,19 @@ const AdminDashboard: React.FC = () => {
         return sum + order.items.reduce((itemSum, item) => itemSum + item.quantity, 0);
       }, 0);
 
+    const openTickets = supportTickets.filter(ticket => 
+      ['open', 'in_progress'].includes(ticket.status)
+    ).length;
+
     return {
       totalOrders,
       activeOrders,
       pendingOrders,
       totalRevenue,
       totalItems,
-      totalCategories: categories.length
+      totalCategories: categories.length,
+      openSupportTickets: openTickets,
+      totalSupportTickets: supportTickets.length
     };
   };
 
@@ -146,8 +176,9 @@ const AdminDashboard: React.FC = () => {
         note: `Status updated to ${newStatus} by ${user.role}`
       });
       showSuccess('Order status updated successfully');
-    } catch (error) {
-      showError('Failed to update order status');
+    } catch (error: any) {
+      console.error('Status update error:', error);
+      showError(error.response?.data?.message || 'Failed to update order status');
     }
   };
 
@@ -161,8 +192,9 @@ const AdminDashboard: React.FC = () => {
         pickupBoyId
       });
       showSuccess('Pickup boy assigned successfully');
-    } catch (error) {
-      showError('Failed to assign pickup boy');
+    } catch (error: any) {
+      console.error('Assignment error:', error);
+      showError(error.response?.data?.message || 'Failed to assign pickup boy');
     } finally {
       setAssigningOrder(null);
     }
@@ -276,12 +308,12 @@ const AdminDashboard: React.FC = () => {
         <Card variant="elevated" className="p-6">
           <div className="flex items-center">
             <div className="bg-purple-500 p-3 rounded-lg text-white mr-4">
-              <Activity className="h-6 w-6" />
+              <MessageCircle className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">Items Processed</p>
-              <p className="text-2xl font-bold text-gray-900">{stats.totalItems}</p>
-              <p className="text-sm text-purple-600">Total items</p>
+              <p className="text-sm font-medium text-gray-600">Support Tickets</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.openSupportTickets}</p>
+              <p className="text-sm text-purple-600">Open tickets</p>
             </div>
           </div>
         </Card>
@@ -300,10 +332,13 @@ const AdminDashboard: React.FC = () => {
           <div className="p-8">
             <LoadingSpinner />
           </div>
-        ) : ordersError ? (
+        ) : isOrdersError ? (
           <div className="p-6 text-center">
             <AlertCircle className="h-12 w-12 text-red-400 mx-auto mb-4" />
             <p className="text-red-600 mb-4">Failed to load orders</p>
+            <p className="text-sm text-gray-600 mb-4">
+              {ordersError?.response?.data?.message || 'Unable to connect to the server'}
+            </p>
             <Button variant="outline" size="sm" onClick={handleRefresh}>
               Retry
             </Button>
@@ -363,14 +398,15 @@ const AdminDashboard: React.FC = () => {
                       </Link>
                     </td>
                   </tr>
-                ))}
+                )) || []}
               </tbody>
             </table>
             
-            {(!ordersData?.data || ordersData.data.length === 0) && (
+            {(!ordersData?.data || ordersData.data.length === 0) && !ordersLoading && (
               <div className="p-6 text-center">
                 <Package className="h-12 w-12 text-gray-300 mx-auto mb-4" />
                 <p className="text-gray-500">No orders found</p>
+                <p className="text-sm text-gray-400 mt-2">Orders will appear here once customers start placing them</p>
               </div>
             )}
           </div>
@@ -424,6 +460,17 @@ const AdminDashboard: React.FC = () => {
 
         {ordersLoading ? (
           <LoadingSpinner />
+        ) : isOrdersError ? (
+          <div className="text-center py-8">
+            <AlertCircle className="h-12 w-12 text-red-400 mx-auto mb-4" />
+            <p className="text-red-600 mb-2">Failed to load orders</p>
+            <p className="text-sm text-gray-600 mb-4">
+              {ordersError?.response?.data?.message || 'Unable to connect to the server'}
+            </p>
+            <Button variant="outline" size="sm" onClick={handleRefresh}>
+              Try Again
+            </Button>
+          </div>
         ) : (
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-gray-200">
@@ -543,6 +590,7 @@ const AdminDashboard: React.FC = () => {
               <div className="text-center py-8">
                 <Package className="h-12 w-12 text-gray-300 mx-auto mb-4" />
                 <p className="text-gray-500">No orders found matching your criteria.</p>
+                <p className="text-sm text-gray-400 mt-2">Try adjusting your search or filters</p>
               </div>
             )}
           </div>
@@ -555,10 +603,12 @@ const AdminDashboard: React.FC = () => {
     <div className="space-y-6">
       <div className="flex flex-col md:flex-row md:items-center md:justify-between">
         <h2 className="text-xl font-semibold text-gray-900">Support Management</h2>
-        <Button variant="primary">
-          <MessageCircle className="h-4 w-4 mr-2" />
-          View All Tickets
-        </Button>
+        <Link to="/dashboard/support">
+          <Button variant="primary">
+            <MessageCircle className="h-4 w-4 mr-2" />
+            View All Tickets
+          </Button>
+        </Link>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
@@ -569,7 +619,7 @@ const AdminDashboard: React.FC = () => {
             </div>
             <div>
               <p className="text-sm font-medium text-gray-600">Open Tickets</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.openSupportTickets}</p>
               <p className="text-sm text-amber-600">Need response</p>
             </div>
           </div>
@@ -581,9 +631,9 @@ const AdminDashboard: React.FC = () => {
               <Clock className="h-6 w-6" />
             </div>
             <div>
-              <p className="text-sm font-medium text-gray-600">In Progress</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
-              <p className="text-sm text-blue-600">Being handled</p>
+              <p className="text-sm font-medium text-gray-600">Total Tickets</p>
+              <p className="text-2xl font-bold text-gray-900">{stats.totalSupportTickets}</p>
+              <p className="text-sm text-blue-600">All time</p>
             </div>
           </div>
         </Card>
@@ -595,32 +645,56 @@ const AdminDashboard: React.FC = () => {
             </div>
             <div>
               <p className="text-sm font-medium text-gray-600">Resolved</p>
-              <p className="text-2xl font-bold text-gray-900">0</p>
+              <p className="text-2xl font-bold text-gray-900">{supportData?.data?.filter(t => t.status === 'resolved').length || 0}</p>
               <p className="text-sm text-green-600">This month</p>
             </div>
           </div>
         </Card>
       </div>
 
-      <Card variant="elevated" className="p-6">
-        <div className="text-center py-8">
-          <MessageCircle className="h-12 w-12 text-gray-300 mx-auto mb-4" />
-          <p className="text-gray-500 mb-4">Support ticket management</p>
-          <p className="text-sm text-gray-400 mb-6">
-            View and manage customer support tickets, respond to inquiries, and track resolution status.
-          </p>
-          <div className="flex justify-center space-x-3">
-            <Button variant="outline">
-              <MessageCircle className="h-4 w-4 mr-2" />
-              View Support Tickets
-            </Button>
-            <Button variant="primary">
-              <Settings className="h-4 w-4 mr-2" />
-              Support Settings
-            </Button>
+      {supportLoading ? (
+        <Card variant="elevated" className="p-6">
+          <LoadingSpinner />
+        </Card>
+      ) : supportError ? (
+        <Card variant="elevated" className="p-6">
+          <div className="text-center py-8">
+            <MessageCircle className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-500 mb-4">Unable to load support tickets</p>
+            <p className="text-sm text-gray-400 mb-6">
+              There was an error connecting to the support system.
+            </p>
+            <Link to="/dashboard/support">
+              <Button variant="outline">
+                <MessageCircle className="h-4 w-4 mr-2" />
+                Try Support Dashboard
+              </Button>
+            </Link>
           </div>
-        </div>
-      </Card>
+        </Card>
+      ) : (
+        <Card variant="elevated" className="p-6">
+          <div className="text-center py-8">
+            <MessageCircle className="h-12 w-12 text-gray-300 mx-auto mb-4" />
+            <p className="text-gray-500 mb-4">Support ticket management</p>
+            <p className="text-sm text-gray-400 mb-6">
+              View and manage customer support tickets, respond to inquiries, and track resolution status.
+            </p>
+            <div className="flex justify-center space-x-3">
+              <Link to="/dashboard/support">
+                <Button variant="outline">
+                  <MessageCircle className="h-4 w-4 mr-2" />
+                  View Support Tickets
+                </Button>
+              </Link>
+              <Button variant="primary">
+                <Settings className="h-4 w-4 mr-2" />
+                Support Settings
+              </Button>
+            </div>
+          </div>
+        </Card>
+      )}
     </div>
   );
 
