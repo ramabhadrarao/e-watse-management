@@ -1,5 +1,8 @@
 // src/pages/dashboard/SupportTickets.tsx
-// Fixed Support Tickets Management Page with proper error handling
+// Updated Support Tickets Management Page with real API integration
+// Features: ticket listing, creation, filtering, search, role-based access
+// Path: /dashboard/support
+// Dependencies: Real backend API calls via useSupport hooks
 
 import React, { useState, useContext } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
@@ -20,37 +23,60 @@ import {
   User,
   Calendar,
   Download,
-  Settings
+  Settings,
+  Star,
+  Package,
+  Phone,
+  Mail,
+  Tag,
+  UserPlus
 } from 'lucide-react';
 import Card from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
 import Input from '../../components/ui/Input';
 import Select from '../../components/ui/Select';
+import TextArea from '../../components/ui/TextArea';
 import LoadingSpinner from '../../components/ui/LoadingSpinner';
 import AuthContext from '../../context/AuthContext';
 import { useToast } from '../../hooks/useToast';
 
-// Import hooks with fallback
+// Import real API hooks
 import { 
   useUserSupportTickets, 
   useAllSupportTickets, 
   useSupportStats,
+  useCreateSupportTicket,
   useUpdateTicketStatus,
-  useAssignSupportTicket 
+  useAssignSupportTicket,
+  useExportSupportTickets,
+  useBulkUpdateTickets
 } from '../../hooks/useSupport';
+import { useUsers } from '../../hooks/useUsers';
 
 const SupportTickets: React.FC = () => {
   const { user } = useContext(AuthContext);
   const navigate = useNavigate();
   const [statusFilter, setStatusFilter] = useState('all');
   const [priorityFilter, setPriorityFilter] = useState('all');
+  const [categoryFilter, setCategoryFilter] = useState('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [currentPage, setCurrentPage] = useState(1);
+  const [selectedTickets, setSelectedTickets] = useState<string[]>([]);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const { showSuccess, showError } = useToast();
 
   const isAdmin = user?.role === 'admin' || user?.role === 'manager';
 
-  // API Hooks with better error handling
+  // New ticket form state
+  const [newTicket, setNewTicket] = useState({
+    subject: '',
+    description: '',
+    category: 'general_inquiry',
+    priority: 'medium',
+    orderId: ''
+  });
+
+  // API Hooks with proper error handling
   const { 
     data: userTicketsData, 
     isLoading: userTicketsLoading, 
@@ -78,6 +104,7 @@ const SupportTickets: React.FC = () => {
   } = useAllSupportTickets({
     status: statusFilter !== 'all' ? statusFilter : undefined,
     priority: priorityFilter !== 'all' ? priorityFilter : undefined,
+    category: categoryFilter !== 'all' ? categoryFilter : undefined,
     page: currentPage,
     limit: 10
   }, { 
@@ -99,8 +126,17 @@ const SupportTickets: React.FC = () => {
     }
   });
 
+  // Get team members for assignment (Admin only)
+  const { 
+    data: usersData 
+  } = useUsers({ role: 'admin,manager' }, { enabled: isAdmin });
+
+  // Mutations
+  const createTicketMutation = useCreateSupportTicket();
   const updateTicketStatusMutation = useUpdateTicketStatus();
   const assignTicketMutation = useAssignSupportTicket();
+  const exportTicketsMutation = useExportSupportTickets();
+  const bulkUpdateMutation = useBulkUpdateTickets();
 
   // Choose appropriate data based on user role
   const ticketsData = isAdmin ? allTicketsData : userTicketsData;
@@ -112,11 +148,13 @@ const SupportTickets: React.FC = () => {
   const tickets = ticketsData?.data || [];
   const totalTickets = ticketsData?.total || 0;
   const supportStats = statsData?.data || {
+    openTickets: 0,
     resolvedTickets: 0,
     averageResolutionTime: 0,
-    openTickets: 0,
-    totalTickets: 0
+    totalTickets: 0,
+    customerSatisfactionRating: 0
   };
+  const teamMembers = usersData?.data || [];
 
   const getStatusIcon = (status: string) => {
     switch (status) {
@@ -165,6 +203,19 @@ const SupportTickets: React.FC = () => {
     }
   };
 
+  const getCategoryLabel = (category: string) => {
+    const categories = {
+      order_issue: 'Order Issue',
+      payment_issue: 'Payment Issue',
+      pickup_issue: 'Pickup Issue',
+      account_issue: 'Account Issue',
+      general_inquiry: 'General Inquiry',
+      complaint: 'Complaint',
+      feedback: 'Feedback'
+    };
+    return categories[category as keyof typeof categories] || category;
+  };
+
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString('en-IN', {
       year: 'numeric',
@@ -178,6 +229,35 @@ const SupportTickets: React.FC = () => {
   const handleRefresh = () => {
     refetchTickets();
     showSuccess('Support tickets refreshed');
+  };
+
+  const handleCreateTicket = async () => {
+    if (!newTicket.subject || !newTicket.description) {
+      showError('Please fill in subject and description');
+      return;
+    }
+
+    try {
+      await createTicketMutation.mutateAsync({
+        subject: newTicket.subject,
+        description: newTicket.description,
+        category: newTicket.category,
+        priority: newTicket.priority,
+        orderId: newTicket.orderId || undefined
+      });
+      
+      setShowCreateModal(false);
+      setNewTicket({
+        subject: '',
+        description: '',
+        category: 'general_inquiry',
+        priority: 'medium',
+        orderId: ''
+      });
+      showSuccess('Support ticket created successfully');
+    } catch (error: any) {
+      showError(error.response?.data?.message || 'Failed to create support ticket');
+    }
   };
 
   const handleStatusUpdate = async (ticketId: string, newStatus: string) => {
@@ -206,10 +286,52 @@ const SupportTickets: React.FC = () => {
     }
   };
 
-  const handleCreateTicket = () => {
-    // For now, show a simple modal or redirect
-    showSuccess('Redirecting to create ticket...');
-    // In a real app, you'd navigate to a create ticket page or open a modal
+  const handleExport = async () => {
+    try {
+      await exportTicketsMutation.mutateAsync({
+        status: statusFilter !== 'all' ? statusFilter : undefined,
+        priority: priorityFilter !== 'all' ? priorityFilter : undefined,
+        category: categoryFilter !== 'all' ? categoryFilter : undefined,
+        format: 'csv'
+      });
+      showSuccess('Support tickets exported successfully');
+    } catch (error: any) {
+      showError('Failed to export support tickets');
+    }
+  };
+
+  const handleSelectTicket = (ticketId: string) => {
+    setSelectedTickets(prev => 
+      prev.includes(ticketId) 
+        ? prev.filter(id => id !== ticketId)
+        : [...prev, ticketId]
+    );
+  };
+
+  const handleSelectAllTickets = () => {
+    if (selectedTickets.length === tickets.length) {
+      setSelectedTickets([]);
+    } else {
+      setSelectedTickets(tickets.map(ticket => ticket._id));
+    }
+  };
+
+  const handleBulkUpdate = async (updates: { status?: string; assignedTo?: string; priority?: string }) => {
+    if (selectedTickets.length === 0) {
+      showError('Please select tickets to update');
+      return;
+    }
+
+    try {
+      await bulkUpdateMutation.mutateAsync({
+        ticketIds: selectedTickets,
+        updates
+      });
+      setSelectedTickets([]);
+      showSuccess(`${selectedTickets.length} tickets updated successfully`);
+    } catch (error: any) {
+      showError('Failed to update tickets');
+    }
   };
 
   // Show loading spinner while loading
@@ -244,7 +366,7 @@ const SupportTickets: React.FC = () => {
           </p>
           <div className="space-y-2">
             <p className="text-sm text-gray-500">
-              This might be because the support system is not yet implemented on the backend.
+              Please check your connection and try again.
             </p>
             <Button variant="primary" onClick={handleRefresh}>
               <RefreshCw className="h-4 w-4 mr-2" />
@@ -274,7 +396,12 @@ const SupportTickets: React.FC = () => {
           </Button>
           {isAdmin && (
             <>
-              <Button variant="outline" size="sm">
+              <Button 
+                variant="outline" 
+                size="sm" 
+                onClick={handleExport}
+                loading={exportTicketsMutation.isLoading}
+              >
                 <Download className="h-4 w-4 mr-2" />
                 Export
               </Button>
@@ -284,7 +411,7 @@ const SupportTickets: React.FC = () => {
               </Button>
             </>
           )}
-          <Button variant="primary" onClick={handleCreateTicket}>
+          <Button variant="primary" onClick={() => setShowCreateModal(true)}>
             <Plus className="h-4 w-4 mr-2" />
             {isAdmin ? 'Create Ticket' : 'New Ticket'}
           </Button>
@@ -336,12 +463,12 @@ const SupportTickets: React.FC = () => {
           <Card variant="elevated" className="p-6">
             <div className="flex items-center">
               <div className="bg-purple-100 text-purple-600 p-3 rounded-full mr-4">
-                <Flag className="h-6 w-6" />
+                <Star className="h-6 w-6" />
               </div>
               <div>
-                <p className="text-sm font-medium text-gray-600">Total Tickets</p>
-                <p className="text-2xl font-bold text-gray-900">{supportStats.totalTickets || 0}</p>
-                <p className="text-xs text-purple-600">All time</p>
+                <p className="text-sm font-medium text-gray-600">Satisfaction</p>
+                <p className="text-2xl font-bold text-gray-900">{supportStats.customerSatisfactionRating || 0}/5</p>
+                <p className="text-xs text-purple-600">Customer rating</p>
               </div>
             </div>
           </Card>
@@ -350,7 +477,7 @@ const SupportTickets: React.FC = () => {
 
       {/* Filters and Search */}
       <Card variant="elevated" className="p-6 mb-6">
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
           <Input
             placeholder="Search tickets..."
             value={searchTerm}
@@ -371,22 +498,74 @@ const SupportTickets: React.FC = () => {
             icon={<Filter className="h-4 w-4" />}
           />
           {isAdmin && (
-            <Select
-              options={[
-                { value: 'all', label: 'All Priority' },
-                { value: 'urgent', label: 'Urgent' },
-                { value: 'high', label: 'High' },
-                { value: 'medium', label: 'Medium' },
-                { value: 'low', label: 'Low' }
-              ]}
-              value={priorityFilter}
-              onChange={(e) => setPriorityFilter(e.target.value)}
-            />
+            <>
+              <Select
+                options={[
+                  { value: 'all', label: 'All Priority' },
+                  { value: 'urgent', label: 'Urgent' },
+                  { value: 'high', label: 'High' },
+                  { value: 'medium', label: 'Medium' },
+                  { value: 'low', label: 'Low' }
+                ]}
+                value={priorityFilter}
+                onChange={(e) => setPriorityFilter(e.target.value)}
+              />
+              <Select
+                options={[
+                  { value: 'all', label: 'All Categories' },
+                  { value: 'order_issue', label: 'Order Issue' },
+                  { value: 'payment_issue', label: 'Payment Issue' },
+                  { value: 'pickup_issue', label: 'Pickup Issue' },
+                  { value: 'account_issue', label: 'Account Issue' },
+                  { value: 'general_inquiry', label: 'General Inquiry' },
+                  { value: 'complaint', label: 'Complaint' },
+                  { value: 'feedback', label: 'Feedback' }
+                ]}
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+              />
+            </>
           )}
           <div className="flex items-center text-sm text-gray-600">
             Showing {tickets.length} of {totalTickets} tickets
           </div>
         </div>
+
+        {/* Bulk Actions for Admin */}
+        {isAdmin && selectedTickets.length > 0 && (
+          <div className="mt-4 flex items-center space-x-3 p-3 bg-blue-50 rounded-lg">
+            <span className="text-sm text-blue-700">{selectedTickets.length} tickets selected</span>
+            <Select
+              options={[
+                { value: '', label: 'Bulk Status Update' },
+                { value: 'in_progress', label: 'Mark as In Progress' },
+                { value: 'resolved', label: 'Mark as Resolved' },
+                { value: 'closed', label: 'Mark as Closed' }
+              ]}
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleBulkUpdate({ status: e.target.value });
+                  e.target.value = '';
+                }
+              }}
+            />
+            <Select
+              options={[
+                { value: '', label: 'Bulk Assignment' },
+                ...teamMembers.map(member => ({ 
+                  value: member._id, 
+                  label: `${member.firstName} ${member.lastName}` 
+                }))
+              ]}
+              onChange={(e) => {
+                if (e.target.value) {
+                  handleBulkUpdate({ assignedTo: e.target.value });
+                  e.target.value = '';
+                }
+              }}
+            />
+          </div>
+        )}
       </Card>
 
       {/* Tickets List */}
@@ -400,96 +579,112 @@ const SupportTickets: React.FC = () => {
             <p className="text-gray-600 mb-6">
               {statusFilter === 'all' 
                 ? (isAdmin ? "No support tickets match your criteria." : "You haven't created any support tickets yet.")
-                : `No tickets with status "${statusFilter}" found.`
+                : `No tickets with the selected filters found.`
               }
             </p>
-            <Button variant="primary" onClick={handleCreateTicket}>
+            <Button variant="primary" onClick={() => setShowCreateModal(true)}>
               <Plus className="h-4 w-4 mr-2" />
               {isAdmin ? 'Create First Ticket' : 'Create Your First Ticket'}
             </Button>
           </Card>
         ) : (
-          tickets.map((ticket: any) => (
+          tickets.map((ticket) => (
             <Card key={ticket._id} variant="elevated" className="p-6 hover:shadow-lg transition-shadow">
               <div className="flex items-start justify-between">
-                <div className="flex-1">
-                  <div className="flex items-center space-x-3 mb-3">
-                    {getStatusIcon(ticket.status)}
-                    <div className="flex items-center space-x-2">
-                      <h3 className="text-lg font-semibold text-gray-900 hover:text-green-600 cursor-pointer">
-                        <Link to={`/dashboard/support/${ticket._id}`}>
-                          {ticket.subject}
-                        </Link>
-                      </h3>
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(ticket.status)}`}>
-                        {ticket.status.replace('_', ' ').toUpperCase()}
-                      </span>
-                      <span className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(ticket.priority)}`}>
-                        {ticket.priority.toUpperCase()}
-                      </span>
-                    </div>
-                  </div>
-                  
-                  <p className="text-gray-600 mb-4 line-clamp-2">
-                    {ticket.description}
-                  </p>
-                  
-                  <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
-                    <div className="flex items-center">
-                      <MessageCircle className="h-4 w-4 mr-1" />
-                      <span>#{ticket.ticketNumber}</span>
-                    </div>
-                    
-                    {isAdmin && ticket.customerId && (
-                      <div className="flex items-center">
-                        <User className="h-4 w-4 mr-1" />
-                        <span>{ticket.customerId.firstName} {ticket.customerId.lastName}</span>
-                      </div>
-                    )}
-                    
-                    <div className="flex items-center">
-                      <Calendar className="h-4 w-4 mr-1" />
-                      <span>Created {formatDate(ticket.createdAt)}</span>
-                    </div>
-                    
-{ticket.lastActivityAt && (
-                      <div className="flex items-center">
-                        <Clock className="h-4 w-4 mr-1" />
-                        <span>Last activity {formatDate(ticket.lastActivityAt)}</span>
-                      </div>
-                    )}
-                    
-                    {ticket.orderId && (
-                      <div className="flex items-center">
-                        <Link 
-                          to={`/dashboard/pickups/${ticket.orderId._id}`}
-                          className="text-blue-600 hover:text-blue-800"
-                        >
-                          Order #{ticket.orderId.orderNumber}
-                        </Link>
-                      </div>
-                    )}
-                    
-                    {ticket.assignedTo && (
-                      <div className="flex items-center">
-                        <User className="h-4 w-4 mr-1" />
-                        <span>Assigned to {ticket.assignedTo.firstName} {ticket.assignedTo.lastName}</span>
-                      </div>
-                    )}
-                  </div>
-                  
-                  {ticket.tags && ticket.tags.length > 0 && (
-                    <div className="mt-3 flex flex-wrap gap-1">
-                      {ticket.tags.map((tag: string, index: number) => (
-                        <span 
-                          key={index}
-                          className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded"
-                        >
-                          {tag}
-                        </span>
-                      ))}
-                    </div>
+                <div className="flex items-start space-x-3 flex-1">
+                  {isAdmin && (
+                    <input
+                      type="checkbox"
+                      checked={selectedTickets.includes(ticket._id)}
+                      onChange={() => handleSelectTicket(ticket._id)}
+                      className="mt-1 rounded border-gray-300 text-green-600 focus:ring-green-500"
+                    />
                   )}
+                  
+                  <div className="flex-1">
+                    <div className="flex items-center space-x-3 mb-3">
+                      {getStatusIcon(ticket.status)}
+                      <div className="flex items-center space-x-2">
+                        <h3 className="text-lg font-semibold text-gray-900 hover:text-green-600 cursor-pointer">
+                          <Link to={`/dashboard/support/${ticket._id}`}>
+                            {ticket.subject}
+                          </Link>
+                        </h3>
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(ticket.status)}`}>
+                          {ticket.status.replace('_', ' ').toUpperCase()}
+                        </span>
+                        <span className={`px-2 py-1 text-xs font-medium rounded-full ${getPriorityColor(ticket.priority)}`}>
+                          {ticket.priority.toUpperCase()}
+                        </span>
+                        <span className="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-800">
+                          {getCategoryLabel(ticket.category)}
+                        </span>
+                      </div>
+                    </div>
+                    
+                    <p className="text-gray-600 mb-4 line-clamp-2">
+                      {ticket.description}
+                    </p>
+                    
+                    <div className="flex flex-wrap items-center gap-4 text-sm text-gray-500">
+                      <div className="flex items-center">
+                        <MessageCircle className="h-4 w-4 mr-1" />
+                        <span>#{ticket.ticketNumber}</span>
+                      </div>
+                      
+                      {isAdmin && ticket.customerId && (
+                        <div className="flex items-center">
+                          <User className="h-4 w-4 mr-1" />
+                          <span>{ticket.customerId.firstName} {ticket.customerId.lastName}</span>
+                        </div>
+                      )}
+                      
+                      <div className="flex items-center">
+                        <Calendar className="h-4 w-4 mr-1" />
+                        <span>Created {formatDate(ticket.createdAt)}</span>
+                      </div>
+                      
+                      {ticket.lastActivityAt && (
+                        <div className="flex items-center">
+                          <Clock className="h-4 w-4 mr-1" />
+                          <span>Last activity {formatDate(ticket.lastActivityAt)}</span>
+                        </div>
+                      )}
+                      
+                      {ticket.orderId && (
+                        <div className="flex items-center">
+                          <Package className="h-4 w-4 mr-1" />
+                          <Link 
+                            to={`/dashboard/pickups/${ticket.orderId._id}`}
+                            className="text-blue-600 hover:text-blue-800"
+                          >
+                            Order #{ticket.orderId.orderNumber}
+                          </Link>
+                        </div>
+                      )}
+                      
+                      {ticket.assignedTo && (
+                        <div className="flex items-center">
+                          <UserPlus className="h-4 w-4 mr-1" />
+                          <span>Assigned to {ticket.assignedTo.firstName} {ticket.assignedTo.lastName}</span>
+                        </div>
+                      )}
+                    </div>
+                    
+                    {ticket.tags && ticket.tags.length > 0 && (
+                      <div className="mt-3 flex flex-wrap gap-1">
+                        {ticket.tags.map((tag, index) => (
+                          <span 
+                            key={index}
+                            className="px-2 py-1 text-xs bg-gray-100 text-gray-600 rounded flex items-center"
+                          >
+                            <Tag className="h-3 w-3 mr-1" />
+                            {tag}
+                          </span>
+                        ))}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 
                 <div className="ml-6 flex flex-col space-y-2">
@@ -516,13 +711,26 @@ const SupportTickets: React.FC = () => {
                             e.target.value = '';
                           }
                         }}
+                        disabled={updateTicketStatusMutation.isLoading}
                       />
                       
                       {!ticket.assignedTo && (
-                        <Button variant="outline" size="sm">
-                          <User className="h-4 w-4 mr-2" />
-                          Assign
-                        </Button>
+                        <Select
+                          options={[
+                            { value: '', label: 'Assign to...' },
+                            ...teamMembers.map(member => ({ 
+                              value: member._id, 
+                              label: `${member.firstName} ${member.lastName}` 
+                            }))
+                          ]}
+                          onChange={(e) => {
+                            if (e.target.value) {
+                              handleAssignTicket(ticket._id, e.target.value);
+                              e.target.value = '';
+                            }
+                          }}
+                          disabled={assignTicketMutation.isLoading}
+                        />
                       )}
                     </>
                   )}
@@ -543,18 +751,14 @@ const SupportTickets: React.FC = () => {
                       <span className="text-sm font-medium text-green-800">Customer Rating:</span>
                       <div className="ml-2 flex items-center">
                         {[1, 2, 3, 4, 5].map((star) => (
-                          <svg
+                          <Star
                             key={star}
                             className={`h-4 w-4 ${
                               star <= ticket.customerRating.rating
-                                ? 'text-yellow-400'
+                                ? 'text-yellow-400 fill-current'
                                 : 'text-gray-300'
                             }`}
-                            fill="currentColor"
-                            viewBox="0 0 20 20"
-                          >
-                            <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z" />
-                          </svg>
+                          />
                         ))}
                         <span className="ml-1 text-sm text-green-700">({ticket.customerRating.rating}/5)</span>
                       </div>
@@ -598,6 +802,95 @@ const SupportTickets: React.FC = () => {
             >
               Next
             </Button>
+          </div>
+        </div>
+      )}
+
+      {/* Create Ticket Modal */}
+      {showCreateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
+            <h3 className="text-lg font-semibold text-gray-900 mb-4">Create Support Ticket</h3>
+            
+            <div className="space-y-4">
+              <Input
+                label="Subject"
+                placeholder="Brief description of your issue"
+                value={newTicket.subject}
+                onChange={(e) => setNewTicket(prev => ({ ...prev, subject: e.target.value }))}
+              />
+              
+              <TextArea
+                label="Description"
+                placeholder="Detailed description of your issue..."
+                rows={4}
+                value={newTicket.description}
+                onChange={(e) => setNewTicket(prev => ({ ...prev, description: e.target.value }))}
+              />
+              
+              <div className="grid grid-cols-2 gap-4">
+                <Select
+                  label="Category"
+                  options={[
+                    { value: 'general_inquiry', label: 'General Inquiry' },
+                    { value: 'order_issue', label: 'Order Issue' },
+                    { value: 'payment_issue', label: 'Payment Issue' },
+                    { value: 'pickup_issue', label: 'Pickup Issue' },
+                    { value: 'account_issue', label: 'Account Issue' },
+                    { value: 'complaint', label: 'Complaint' },
+                    { value: 'feedback', label: 'Feedback' }
+                  ]}
+                  value={newTicket.category}
+                  onChange={(e) => setNewTicket(prev => ({ ...prev, category: e.target.value }))}
+                />
+                
+                <Select
+                  label="Priority"
+                  options={[
+                    { value: 'low', label: 'Low' },
+                    { value: 'medium', label: 'Medium' },
+                    { value: 'high', label: 'High' },
+                    { value: 'urgent', label: 'Urgent' }
+                  ]}
+                  value={newTicket.priority}
+                  onChange={(e) => setNewTicket(prev => ({ ...prev, priority: e.target.value }))}
+                />
+              </div>
+              
+              <Input
+                label="Related Order ID (Optional)"
+                placeholder="Enter order number if this relates to an order"
+                value={newTicket.orderId}
+                onChange={(e) => setNewTicket(prev => ({ ...prev, orderId: e.target.value }))}
+              />
+            </div>
+
+            <div className="flex space-x-3 mt-6">
+              <Button
+                variant="outline"
+                fullWidth
+                onClick={() => {
+                  setShowCreateModal(false);
+                  setNewTicket({
+                    subject: '',
+                    description: '',
+                    category: 'general_inquiry',
+                    priority: 'medium',
+                    orderId: ''
+                  });
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                variant="primary"
+                fullWidth
+                onClick={handleCreateTicket}
+                loading={createTicketMutation.isLoading}
+              >
+                Create Ticket
+              </Button>
+            </div>
           </div>
         </div>
       )}
