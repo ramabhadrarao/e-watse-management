@@ -1,6 +1,5 @@
 // src/App.tsx
-// Main App component with updated routing for all pages
-// Includes all dashboard routes and order details
+// Fixed App component with proper imports and routing
 
 import React from 'react';
 import { BrowserRouter as Router, Routes, Route } from 'react-router-dom';
@@ -32,14 +31,32 @@ import OrderDetails from './pages/dashboard/OrderDetails';
 import { AuthProvider } from './context/AuthContext';
 import PrivateRoute from './components/routing/PrivateRoute';
 
-const queryClient = new QueryClient();
+const queryClient = new QueryClient({
+  defaultOptions: {
+    queries: {
+      retry: 1,
+      refetchOnWindowFocus: false,
+      staleTime: 5 * 60 * 1000, // 5 minutes
+    },
+  },
+});
 
 function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <AuthProvider>
         <Router>
-          <ToastContainer position="top-right" autoClose={5000} />
+          <ToastContainer 
+            position="top-right" 
+            autoClose={5000}
+            hideProgressBar={false}
+            newestOnTop={false}
+            closeOnClick
+            rtl={false}
+            pauseOnFocusLoss
+            draggable
+            pauseOnHover
+          />
           <Routes>
             {/* Public Routes */}
             <Route path="/" element={<MainLayout />}>
@@ -60,7 +77,10 @@ function App() {
                 </PrivateRoute>
               }
             >
+              {/* Default dashboard route */}
               <Route index element={<UserDashboard />} />
+              
+              {/* Customer Routes */}
               <Route path="pickups" element={<MyPickups />} />
               <Route path="pickups/:id" element={<OrderDetails />} />
               <Route path="request" element={<NewPickupRequest />} />

@@ -1,6 +1,24 @@
+// src/layouts/DashboardLayout.tsx
+// Updated Dashboard Layout with role-based navigation
+
 import React, { useState, useContext } from 'react';
 import { Outlet, Link, useLocation, useNavigate } from 'react-router-dom';
-import { RecycleIcon, LayoutDashboard, Truck, Package, UserCircle, Settings, LogOut, Menu, X } from 'lucide-react';
+import { 
+  RecycleIcon, 
+  LayoutDashboard, 
+  Truck, 
+  Package, 
+  UserCircle, 
+  Settings, 
+  LogOut, 
+  Menu, 
+  X,
+  Users,
+  BarChart3,
+  MessageCircle,
+  MapPin,
+  Shield
+} from 'lucide-react';
 import AuthContext from '../context/AuthContext';
 
 const DashboardLayout: React.FC = () => {
@@ -14,26 +32,82 @@ const DashboardLayout: React.FC = () => {
     navigate('/');
   };
 
-  const navigationItems = [
-    { name: 'Dashboard', icon: <LayoutDashboard />, href: '/dashboard' },
-    { name: 'My Pickups', icon: <Truck />, href: '/dashboard/pickups' },
-    { name: 'Request Pickup', icon: <Package />, href: '/dashboard/request' },
-    { name: 'My Profile', icon: <UserCircle />, href: '/dashboard/profile' },
+  // Navigation items based on user role
+  const getNavigationItems = () => {
+    const baseItems = [
+      { name: 'Dashboard', icon: <LayoutDashboard />, href: '/dashboard' }
+    ];
+
+    switch (user?.role) {
+      case 'admin':
+        return [
+          ...baseItems,
+          { name: 'Orders Management', icon: <Package />, href: '/dashboard/admin' },
+          { name: 'User Management', icon: <Users />, href: '/dashboard/users' },
+          { name: 'Support Tickets', icon: <MessageCircle />, href: '/dashboard/support' },
+          { name: 'Analytics', icon: <BarChart3 />, href: '/dashboard/analytics' },
+          { name: 'Settings', icon: <Settings />, href: '/dashboard/settings' },
+        ];
+      
+      case 'manager':
+        return [
+          ...baseItems,
+          { name: 'Orders Management', icon: <Package />, href: '/dashboard/manage' },
+          { name: 'Support Tickets', icon: <MessageCircle />, href: '/dashboard/support' },
+          { name: 'Pickup Areas', icon: <MapPin />, href: '/dashboard/areas' },
+          { name: 'Analytics', icon: <BarChart3 />, href: '/dashboard/analytics' },
+        ];
+      
+      case 'pickup_boy':
+        return [
+          ...baseItems,
+          { name: 'Assigned Pickups', icon: <Truck />, href: '/dashboard/assigned' },
+          { name: 'My Route', icon: <MapPin />, href: '/dashboard/route' },
+          { name: 'History', icon: <Package />, href: '/dashboard/history' },
+        ];
+      
+      default: // customer
+        return [
+          ...baseItems,
+          { name: 'My Pickups', icon: <Truck />, href: '/dashboard/pickups' },
+          { name: 'Request Pickup', icon: <Package />, href: '/dashboard/request' },
+          { name: 'Support', icon: <MessageCircle />, href: '/dashboard/support' },
+        ];
+    }
+  };
+
+  const navigationItems = getNavigationItems();
+
+  // Add profile to all users
+  const allNavigationItems = [
+    ...navigationItems,
+    { name: 'My Profile', icon: <UserCircle />, href: '/dashboard/profile' }
   ];
 
-  // Add admin routes if user is admin
-  if (user?.role === 'admin') {
-    navigationItems.push(
-      { name: 'Settings', icon: <Settings />, href: '/dashboard/settings' }
-    );
-  }
+  const getRoleDisplayName = (role: string) => {
+    switch (role) {
+      case 'admin': return 'Administrator';
+      case 'manager': return 'Manager';
+      case 'pickup_boy': return 'Pickup Executive';
+      default: return 'Customer';
+    }
+  };
+
+  const getRoleIcon = (role: string) => {
+    switch (role) {
+      case 'admin': return <Shield className="h-4 w-4 text-red-500" />;
+      case 'manager': return <Settings className="h-4 w-4 text-blue-500" />;
+      case 'pickup_boy': return <Truck className="h-4 w-4 text-green-500" />;
+      default: return <UserCircle className="h-4 w-4 text-gray-500" />;
+    }
+  };
 
   return (
     <div className="min-h-screen bg-gray-100">
       {/* Mobile Sidebar Toggle */}
       <div className="lg:hidden fixed top-4 left-4 z-20">
         <button
-          className="p-2 rounded-md bg-green-500 text-white"
+          className="p-2 rounded-md bg-green-500 text-white shadow-lg"
           onClick={() => setSidebarOpen(!sidebarOpen)}
         >
           {sidebarOpen ? <X size={24} /> : <Menu size={24} />}
@@ -65,9 +139,12 @@ const DashboardLayout: React.FC = () => {
                   {user?.firstName?.charAt(0) || 'U'}{user?.lastName?.charAt(0) || 'U'}
                 </span>
               </div>
-              <div>
+              <div className="flex-1">
                 <div className="font-medium">{user?.firstName} {user?.lastName}</div>
-                <div className="text-xs text-gray-500 capitalize">{user?.role}</div>
+                <div className="flex items-center space-x-1">
+                  {getRoleIcon(user?.role || 'customer')}
+                  <span className="text-xs text-gray-500">{getRoleDisplayName(user?.role || 'customer')}</span>
+                </div>
                 <div className="text-xs text-gray-500">{user?.email}</div>
               </div>
             </div>
@@ -76,7 +153,7 @@ const DashboardLayout: React.FC = () => {
           {/* Navigation */}
           <nav className="flex-1 p-4 overflow-y-auto">
             <ul className="space-y-2">
-              {navigationItems.map((item) => (
+              {allNavigationItems.map((item) => (
                 <li key={item.name}>
                   <Link
                     to={item.href}
@@ -123,6 +200,7 @@ const DashboardLayout: React.FC = () => {
       {/* Main Content */}
       <div className="lg:ml-64">
         <div className="p-6">
+          {/* Breadcrumb or page header could go here */}
           <Outlet />
         </div>
       </div>

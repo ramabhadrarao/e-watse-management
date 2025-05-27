@@ -1,5 +1,5 @@
 // src/services/orderService.ts
-// Order related API calls
+// Enhanced order service with additional admin functionality
 
 import api from './api';
 
@@ -42,8 +42,20 @@ export interface CreateOrderData {
 export interface Order {
   _id: string;
   orderNumber: string;
-  customerId: string;
-  items: OrderItem[];
+  customerId: {
+    _id: string;
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+  };
+  items: (OrderItem & {
+    categoryId: {
+      _id: string;
+      name: string;
+      icon: string;
+    };
+  })[];
   pickupDetails: PickupDetails;
   status: string;
   assignedPickupBoy?: {
@@ -75,8 +87,8 @@ export interface Order {
     updatedBy: string;
     note?: string;
   }>;
-  createdAt: Date;
-  updatedAt: Date;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export const orderService = {
@@ -105,14 +117,28 @@ export const orderService = {
   },
 
   // Get all orders (Admin/Manager)
-  getAllOrders: async (params?: { status?: string; page?: number; limit?: number }) => {
+  getAllOrders: async (params?: { 
+    status?: string; 
+    page?: number; 
+    limit?: number;
+    search?: string;
+  }) => {
     const response = await api.get('/api/orders/all', { params });
     return response.data;
   },
 
   // Update order status (Admin/Manager/PickupBoy)
-  updateOrderStatus: async (id: string, status: string, note?: string) => {
-    const response = await api.put(`/api/orders/${id}/status`, { status, note });
+  updateOrderStatus: async (
+    id: string, 
+    status: string, 
+    note?: string, 
+    actualTotal?: number
+  ) => {
+    const response = await api.put(`/api/orders/${id}/status`, { 
+      status, 
+      note,
+      actualTotal 
+    });
     return response.data;
   },
 
@@ -133,4 +159,113 @@ export const orderService = {
     const response = await api.put(`/api/orders/${id}/verify`, { pin });
     return response.data;
   },
+
+  // Generate order receipt
+  generateOrderReceipt: async (id: string) => {
+    const response = await api.get(`/api/orders/${id}/receipt`, {
+      responseType: 'blob', // Important for PDF download
+    });
+    return response.data;
+  },
+
+  // Get order statistics (Admin/Manager)
+  getOrderStatistics: async (timeframe?: string) => {
+    const response = await api.get('/api/orders/statistics', {
+      params: { timeframe }
+    });
+    return response.data;
+  },
+
+  // Search orders (Admin/Manager)
+  searchOrders: async (query: string, filters?: {
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    customerId?: string;
+    pickupBoyId?: string;
+  }) => {
+    const response = await api.get('/api/orders/search', {
+      params: { q: query, ...filters }
+    });
+    return response.data;
+  },
+
+  // Export orders (Admin/Manager)
+  exportOrders: async (filters?: {
+    status?: string;
+    dateFrom?: string;
+    dateTo?: string;
+    format?: 'csv' | 'excel';
+  }) => {
+    const response = await api.get('/api/orders/export', {
+      params: filters,
+      responseType: 'blob'
+    });
+    return response.data;
+  },
+
+  // Bulk update orders (Admin)
+  bulkUpdateOrders: async (orderIds: string[], updates: {
+    status?: string;
+    pickupBoyId?: string;
+    note?: string;
+  }) => {
+    const response = await api.put('/api/orders/bulk-update', {
+      orderIds,
+      updates
+    });
+    return response.data;
+  },
+
+  // Get orders summary (Admin/Manager)
+  getOrdersSummary: async (period?: 'today' | 'week' | 'month' | 'year') => {
+    const response = await api.get('/api/orders/summary', {
+      params: { period }
+    });
+    return response.data;
+  },
+
+  // Get pickup boy performance (Admin/Manager)
+  getPickupBoyPerformance: async (pickupBoyId?: string, period?: string) => {
+    const response = await api.get('/api/orders/pickup-boy-performance', {
+      params: { pickupBoyId, period }
+    });
+    return response.data;
+  },
+
+  // Get customer order history (Admin/Manager)
+  getCustomerOrderHistory: async (customerId: string) => {
+    const response = await api.get(`/api/orders/customer/${customerId}`);
+    return response.data;
+  },
+
+  // Update order items (Admin/Manager)
+  updateOrderItems: async (id: string, items: OrderItem[]) => {
+    const response = await api.put(`/api/orders/${id}/items`, { items });
+    return response.data;
+  },
+
+  // Add order note (Admin/Manager/PickupBoy)
+  addOrderNote: async (id: string, note: string, isInternal: boolean = false) => {
+    const response = await api.post(`/api/orders/${id}/notes`, { 
+      note, 
+      isInternal 
+    });
+    return response.data;
+  },
+
+  // Get order timeline (All authenticated users)
+  getOrderTimeline: async (id: string) => {
+    const response = await api.get(`/api/orders/${id}/timeline`);
+    return response.data;
+  },
+
+  // Rate completed order (Customer)
+  rateOrder: async (id: string, rating: number, feedback?: string) => {
+    const response = await api.put(`/api/orders/${id}/rate`, {
+      rating,
+      feedback
+    });
+    return response.data;
+  }
 };
